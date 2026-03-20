@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # SFTP 服務 - 接收 Fortigate 備份檔
+  # ==========================================
+  sftp:
+    image: atmoz/sftp:alpine
+    container_name: rconfig-bridge-sftp
+    volumes:
+      - ./data/INCOMING_TEMP:/home/fortigate/upload
+      - ./ssh_keys:/home/fortigate/.ssh:ro
+    ports:
+      - "${SFTP_PORT:-2222}:22"
+    command: fortigate::1001:1001:upload
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 2048
+    networks:
+      - bridge-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==========================================
+  # Watcher 服務 - 監控並轉存到 rconfig
+  # ==========================================
+  watcher:
+    build:
+      context: ./watcher
+      dockerfile: Dockerfile
+    container_name: rconfig-bridge-watcher
+    environment:
+      # rconfig 資料庫連線
+      RCONFIG_DB_HOST: ${RCONFIG_DB_HOST:-localhost}
+      RCONFIG_DB_PORT: ${RCONFIG_DB_PORT:-3306}
+      RCONFIG_DB_NAME: ${RCONFIG_DB_NAME:-rconfig}
+      RCONFIG_DB_USER: ${RCONFIG_DB_USER:-pcc_rconfig}
+      RCONFIG_DB_PASSWORD: ${RCONFIG_DB_PASSWORD}
+
+      # 檔案路徑
+      INCOMING_DIR: /app/incoming
+      RCONFIG_DATA_DIR: /rconfig/storage/app/rconfig/data
+
+      # 日誌設定
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data/INCOMING_TEMP:/app/incoming
+      - ${RCONFIG_PATH:-/var/www/html/rconfig}/storage/app/rconfig/data:/rconfig/storage/app/rconfig/data
+      - ./logs:/var/log/bridge
+    depends_on:
+      - sftp
+    restart: unless-stopped
+    networks:
+      - bridge-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+# ==========================================
+# 網路設定
+# ==========================================
+networks:
+  bridge-network:
+    driver: bridge

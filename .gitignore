@@ -1,0 +1,36 @@
+# ==========================================
+# rconfig Fortigate Bridge - Git Ignore
+# ==========================================
+
+# 環境變數（包含敏感資訊）
+.env
+
+# SSH 私鑰
+ssh_keys/fortigate_rsa
+ssh_keys/fortigate_rsa.pub
+
+# 暫存目錄
+data/
+logs/
+
+# Docker
+docker-compose.override.yml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
