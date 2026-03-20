@@ -69,3 +69,7 @@ services:
 networks:
   bridge-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.254.0/24
+          gateway: 192.168.254.1
