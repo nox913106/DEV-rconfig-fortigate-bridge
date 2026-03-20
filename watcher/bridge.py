@@ -101,9 +101,12 @@ class RconfigDB:
 class FortigateBridge:
     """Fortigate 備份檔轉存邏輯"""
 
-    # 檔名格式：fw01-192.168.1.1-20260320-143000.conf
+    # 支援多種檔名格式：
+    # 格式 1: HQ2-201F-172-16-11-3-20260320153045.conf (IP 用破折號, 日期時間連續)
+    # 格式 2: HQ2-201F-172.16.11.3-20260320-153045.conf (IP 用點號, 日期時間分開)
+    # 格式 3: HQ2-201F-172-16-11-3-20260320.conf (IP 用破折號, 僅日期)
     FILENAME_PATTERN = re.compile(
-        r'^(?P<hostname>[\w\-]+)-(?P<ip>[\d\.]+)-(?P<timestamp>\d{8}-\d{6})\.conf$'
+        r'^(?P<hostname>[\w\-]+?)-(?P<ip>(?:\d+[-\.]\d+[-\.]\d+[-\.]\d+))-(?P<timestamp>[\d\-]+)\.conf$'
     )
 
     def __init__(self, db: RconfigDB):
@@ -133,7 +136,9 @@ class FortigateBridge:
             return False
 
         hostname = parsed['hostname']
+        timestamp = parsed['timestamp']  # 格式：20260320-143000
         logger.info(f"   設備名稱: {hostname}")
+        logger.info(f"   時間戳記: {timestamp}")
 
         # 2. 查詢 rconfig 資料庫取得設備 ID
         device = self.db.get_device_by_name(hostname)
@@ -145,14 +150,7 @@ class FortigateBridge:
         device_id = device['id']
         logger.info(f"   設備 ID: {device_id}")
 
-        # 3. 查詢最新的 config ID
-        config_id = self.db.get_latest_config_id(device_id)
-        if not config_id:
-            logger.warning(f"⚠️ 找不到設備的 config 記錄: {hostname}")
-            # 使用預設 ID（通常是設備首次備份時產生）
-            config_id = device_id
-
-        # 4. 建立目標路徑（符合 rconfig 格式）
+        # 3. 建立目標路徑（符合 rconfig 格式）
         now = datetime.now()
         target_dir = (
             RCONFIG_DATA_DIR /
@@ -162,17 +160,52 @@ class FortigateBridge:
         )
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # 檔名格式：showrunning-config_{config_id}.conf
-        target_file = target_dir / f"showrunning-config_{config_id}.conf"
-
-        logger.info(f"   目標路徑: {target_file}")
-
-        # 5. 複製檔案到 rconfig 目錄
+        # 4. 解析時間戳記取得 HHmm
+        # 支援多種格式：
+        # - 20260320-143000 → 1430
+        # - 20260320153045 → 1530
+        # - 20260320 → 使用當前時間
         try:
-            shutil.copy2(file_path, target_file)
-            logger.info(f"✅ 成功轉存: {hostname} → {target_file}")
+            # 移除所有破折號，取得純數字字串
+            timestamp_clean = timestamp.replace('-', '')
 
-            # 6. 刪除 SFTP 暫存檔案
+            if len(timestamp_clean) >= 12:
+                # 格式：YYYYMMDDHHmmss (14 位) 或 YYYYMMDDHHmm (12 位)
+                hhmm = timestamp_clean[8:12]  # 取第 9-12 位 → HHmm
+            elif len(timestamp_clean) == 8:
+                # 格式：YYYYMMDD (僅日期，無時間)
+                logger.warning(f"⚠️ 時間戳記僅包含日期，使用當前時間")
+                hhmm = now.strftime('%H%M')
+            else:
+                raise ValueError(f"無法識別的時間戳記格式: {timestamp}")
+
+            logger.info(f"   解析時間: {hhmm[:2]}:{hhmm[2:]}")
+
+        except Exception as e:
+            logger.warning(f"⚠️ 無法解析時間戳記 ({timestamp}): {e}，使用當前時間")
+            hhmm = now.strftime('%H%M')
+
+        # 5. 生成兩個檔案
+        # (a) rconfig 格式：show_{HHmm}.txt (覆蓋現有備份)
+        rconfig_file = target_dir / f"show_{hhmm}.txt"
+
+        # (b) 原始檔案：保留完整檔名作為備份
+        backup_file = target_dir / file_path.name
+
+        logger.info(f"   rconfig 檔案: {rconfig_file.name}")
+        logger.info(f"   備份檔案: {backup_file.name}")
+
+        # 6. 複製檔案到 rconfig 目錄（兩份）
+        try:
+            # 複製為 rconfig 格式（覆蓋）
+            shutil.copy2(file_path, rconfig_file)
+            logger.info(f"✅ 已轉存為 rconfig 格式: {rconfig_file.name}")
+
+            # 保留原始檔名
+            shutil.copy2(file_path, backup_file)
+            logger.info(f"✅ 已保留原始備份: {backup_file.name}")
+
+            # 7. 刪除 SFTP 暫存檔案
             file_path.unlink()
             logger.info(f"   已清理暫存檔: {file_path.name}")
 

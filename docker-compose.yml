@@ -8,11 +8,11 @@ services:
     image: atmoz/sftp:alpine
     container_name: rconfig-bridge-sftp
     volumes:
-      - ./data/INCOMING_TEMP:/home/fortigate/upload
-      - ./ssh_keys:/home/fortigate/.ssh:ro
+      - ./data/INCOMING_TEMP:/home/autoinfra/upload
+      - ./ssh_keys:/home/autoinfra/.ssh:ro
     ports:
       - "${SFTP_PORT:-2222}:22"
-    command: fortigate::1001:1001:upload
+    command: "autoinfra:#%2021Radiu$$PcC:1002:1002:upload"  # 臨時測試密碼，正式部署時改回 SSH 金鑰
     restart: unless-stopped
     ulimits:
       nofile:
