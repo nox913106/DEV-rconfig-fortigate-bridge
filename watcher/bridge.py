@@ -102,9 +102,9 @@ class FortigateBridge:
     """Fortigate 備份檔轉存邏輯"""
 
     # Fortigate 備份檔名格式（Fortigate 會自動加上序列號前綴）：
-    # 實際檔名：FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-20260324.conf
-    # 去除前綴後：TWCH-HQ2-201F-01-172-16-11-3-20260324.conf
-    # 解析策略：從後向前 → timestamp(>=8位數字) → IP(4段數字) → hostname(剩餘)
+    # 格式 A (手動): FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-20260324.conf
+    # 格式 B (%%date%%): FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-2026-03-24.conf
+    # 解析策略：明確識別 timestamp 格式 → IP(4段數字) → hostname(剩餘)
 
     def __init__(self, db: RconfigDB):
         self.db = db
@@ -136,28 +136,25 @@ class FortigateBridge:
             logger.warning(f"⚠️ 檔名段數不足: {filename}")
             return None
 
-        # 4. 從後面找 timestamp（>= 8 位的純數字段）
+        # 4. 從後面識別 timestamp（不使用貪婪迴圈，明確匹配兩種格式）
         i = len(parts) - 1
-        timestamp_parts = []
+        timestamp = None
 
-        # 先收集末尾的短數字段（可能是 HHmmss）
-        while i >= 0 and parts[i].isdigit() and len(parts[i]) <= 6:
-            timestamp_parts.insert(0, parts[i])
+        # 格式 A: 單一段 >= 8 位數字 (手動輸入: 20260324 或 20260324143000)
+        if parts[i].isdigit() and len(parts[i]) >= 8:
+            timestamp = parts[i]
             i -= 1
-
-        # 找到主要的日期段（>= 8 位數字）
-        if i >= 0 and parts[i].isdigit() and len(parts[i]) >= 8:
-            timestamp_parts.insert(0, parts[i])
-            i -= 1
-        elif not timestamp_parts:
-            # 如果前面沒收集到短段，也沒找到長段，嘗試合併末尾
+        # 格式 B: %%date%% 展開 → YYYY-MM-DD (3 段: 4位年, 1~2位月, 1~2位日)
+        elif (i >= 2 and
+              parts[i].isdigit() and 1 <= len(parts[i]) <= 2 and
+              parts[i-1].isdigit() and 1 <= len(parts[i-1]) <= 2 and
+              parts[i-2].isdigit() and len(parts[i-2]) == 4):
+            # 正規化為 YYYYMMDD 格式
+            timestamp = f"{parts[i-2]}{parts[i-1].zfill(2)}{parts[i].zfill(2)}"
+            i -= 3
+        else:
             logger.warning(f"⚠️ 找不到時間戳記: {filename}")
             return None
-        else:
-            # 短段本身可能就是完整 timestamp（如 20260324 被拆成多段的情況不存在）
-            pass
-
-        timestamp = '-'.join(timestamp_parts)
 
         # 5. 接下來的 4 段純數字（每段 <= 3 位）是 IP
         ip_parts = []
