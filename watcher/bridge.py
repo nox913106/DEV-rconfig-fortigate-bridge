@@ -101,10 +101,9 @@ class RconfigDB:
 class FortigateBridge:
     """Fortigate 備份檔轉存邏輯"""
 
-    # 支援多種檔名格式：
-    # 格式 1: HQ2-201F-172-16-11-3-20260320153045.conf (IP 用破折號, 日期時間連續)
-    # 格式 2: HQ2-201F-172.16.11.3-20260320-153045.conf (IP 用點號, 日期時間分開)
-    # 格式 3: HQ2-201F-172-16-11-3-20260320.conf (IP 用破折號, 僅日期)
+    # Fortigate 備份檔名格式（Fortigate 會自動加上序列號前綴）：
+    # 實際檔名：FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-20260324.conf
+    # 去除前綴後：TWCH-HQ2-201F-01-172-16-11-3-20260324.conf
     FILENAME_PATTERN = re.compile(
         r'^(?P<hostname>[\w\-]+?)-(?P<ip>(?:\d+[-\.]\d+[-\.]\d+[-\.]\d+))-(?P<timestamp>[\d\-]+)\.conf$'
     )
@@ -112,11 +111,24 @@ class FortigateBridge:
     def __init__(self, db: RconfigDB):
         self.db = db
 
+    def strip_serial_prefix(self, filename):
+        """去除 Fortigate 自動加上的序列號前綴 (例如 FG201FT922913515_)"""
+        if '_' in filename:
+            prefix, rest = filename.split('_', 1)
+            # 驗證前綴是否為 Fortigate 序列號格式 (FG/FW/FL 開頭)
+            if prefix.startswith(('FG', 'FW', 'FL', 'FT')):
+                logger.info(f"   去除序列號前綴: {prefix}")
+                return rest
+        return filename
+
     def parse_filename(self, filename):
         """解析 SFTP 上傳的檔名"""
-        match = self.FILENAME_PATTERN.match(filename)
+        # 先去除 Fortigate 序列號前綴
+        clean_filename = self.strip_serial_prefix(filename)
+
+        match = self.FILENAME_PATTERN.match(clean_filename)
         if not match:
-            logger.warning(f"⚠️ 檔名格式不符: {filename}")
+            logger.warning(f"⚠️ 檔名格式不符: {filename} (清理後: {clean_filename})")
             return None
 
         return {
