@@ -104,9 +104,7 @@ class FortigateBridge:
     # Fortigate 備份檔名格式（Fortigate 會自動加上序列號前綴）：
     # 實際檔名：FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-20260324.conf
     # 去除前綴後：TWCH-HQ2-201F-01-172-16-11-3-20260324.conf
-    FILENAME_PATTERN = re.compile(
-        r'^(?P<hostname>[\w\-]+?)-(?P<ip>(?:\d+[-\.]\d+[-\.]\d+[-\.]\d+))-(?P<timestamp>[\d\-]+)\.conf$'
-    )
+    # 解析策略：從後向前 → timestamp(>=8位數字) → IP(4段數字) → hostname(剩餘)
 
     def __init__(self, db: RconfigDB):
         self.db = db
@@ -115,26 +113,74 @@ class FortigateBridge:
         """去除 Fortigate 自動加上的序列號前綴 (例如 FG201FT922913515_)"""
         if '_' in filename:
             prefix, rest = filename.split('_', 1)
-            # 驗證前綴是否為 Fortigate 序列號格式 (FG/FW/FL 開頭)
             if prefix.startswith(('FG', 'FW', 'FL', 'FT')):
                 logger.info(f"   去除序列號前綴: {prefix}")
                 return rest
         return filename
 
     def parse_filename(self, filename):
-        """解析 SFTP 上傳的檔名"""
-        # 先去除 Fortigate 序列號前綴
+        """解析 SFTP 上傳的檔名（從後向前解析，避免 hostname/IP 邊界混淆）"""
+        # 1. 去除 Fortigate 序列號前綴
         clean_filename = self.strip_serial_prefix(filename)
 
-        match = self.FILENAME_PATTERN.match(clean_filename)
-        if not match:
-            logger.warning(f"⚠️ 檔名格式不符: {filename} (清理後: {clean_filename})")
+        # 2. 驗證副檔名
+        if not clean_filename.endswith('.conf'):
+            logger.warning(f"⚠️ 非 .conf 檔案: {filename}")
+            return None
+
+        # 3. 去掉副檔名，用破折號分割
+        name = clean_filename[:-5]  # 去掉 .conf
+        parts = name.split('-')
+
+        if len(parts) < 6:  # 最少需要：hostname(1) + IP(4) + timestamp(1)
+            logger.warning(f"⚠️ 檔名段數不足: {filename}")
+            return None
+
+        # 4. 從後面找 timestamp（>= 8 位的純數字段）
+        i = len(parts) - 1
+        timestamp_parts = []
+
+        # 先收集末尾的短數字段（可能是 HHmmss）
+        while i >= 0 and parts[i].isdigit() and len(parts[i]) <= 6:
+            timestamp_parts.insert(0, parts[i])
+            i -= 1
+
+        # 找到主要的日期段（>= 8 位數字）
+        if i >= 0 and parts[i].isdigit() and len(parts[i]) >= 8:
+            timestamp_parts.insert(0, parts[i])
+            i -= 1
+        elif not timestamp_parts:
+            # 如果前面沒收集到短段，也沒找到長段，嘗試合併末尾
+            logger.warning(f"⚠️ 找不到時間戳記: {filename}")
+            return None
+        else:
+            # 短段本身可能就是完整 timestamp（如 20260324 被拆成多段的情況不存在）
+            pass
+
+        timestamp = '-'.join(timestamp_parts)
+
+        # 5. 接下來的 4 段純數字（每段 <= 3 位）是 IP
+        ip_parts = []
+        for _ in range(4):
+            if i >= 0 and parts[i].isdigit() and len(parts[i]) <= 3:
+                ip_parts.insert(0, parts[i])
+                i -= 1
+            else:
+                logger.warning(f"⚠️ 無法解析 IP 段: {filename}")
+                return None
+
+        ip = '-'.join(ip_parts)
+
+        # 6. 剩餘的就是 hostname
+        hostname = '-'.join(parts[:i + 1])
+        if not hostname:
+            logger.warning(f"⚠️ hostname 為空: {filename}")
             return None
 
         return {
-            'hostname': match.group('hostname'),
-            'ip': match.group('ip'),
-            'timestamp': match.group('timestamp'),
+            'hostname': hostname,
+            'ip': ip,
+            'timestamp': timestamp,
         }
 
     def process_file(self, file_path: Path):
