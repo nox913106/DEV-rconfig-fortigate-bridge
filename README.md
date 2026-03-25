@@ -2,21 +2,21 @@
 
 > **Fortigate 完整備份檔轉存模組 - 補足 rconfig 缺少的 metadata 支援**
 
-## 📖 專案說明
+## 專案說明
 
 ### 問題背景
 
 rconfig 透過 SSH 執行 `show full-configuration` 備份 Fortigate，但輸出的純文字配置**缺少關鍵 metadata**：
 
 ```bash
-# ❌ rconfig 無法取得這些 metadata
-#config-version=FG201F-7.4.9-FW-build2829-250924:opmode=0:vdom=0:user=Tacacs_admin
-#conf_file_ver=16609656444747006
+# rconfig 無法取得這些 metadata
+#config-version=FG201F-7.4.9-FW-build2829-250924:opmode=0:vdom=0:user=daemon_admin
+#conf_file_ver=16611773863624424
 #buildno=2829
 #global_vdom=1
 ```
 
-**沒有這些 metadata，Fortigate 無法正確恢復配置檔** ⚠️
+**沒有這些 metadata，Fortigate 無法正確恢復配置檔**
 
 ### 解決方案
 
@@ -28,188 +28,319 @@ rconfig 透過 SSH 執行 `show full-configuration` 備份 Fortigate，但輸出
 
 ---
 
-## 🏗️ 系統架構
+## 系統架構
 
 ```
-┌──────────────────────────────────────────────────┐
-│         rconfig 主機 (Ubuntu 22.04)              │
-│                                                  │
-│  ┌────────────────────────────────────────────┐ │
-│  │  rconfig Fortigate Bridge (Docker)        │ │
-│  │                                            │ │
-│  │  ┌──────────┐       ┌──────────────────┐  │ │
-│  │  │  SFTP    │       │  Watcher         │  │ │
-│  │  │  :2222   │──────▶│  (Python)        │  │ │
-│  │  └──────────┘ 上傳  │  - 監控上傳目錄  │  │ │
-│  │                      │  - 查詢 rconfig  │  │ │
-│  │                      │  - 轉存備份檔    │  │ │
-│  │                      └──────────────────┘  │ │
-│  └────────────────────────────────────────────┘ │
-│                          │                       │
-│                          ▼ 轉存到                │
-│  ┌────────────────────────────────────────────┐ │
-│  │  /var/www/html/rconfig/storage/app/        │ │
-│  │    rconfig/data/FortigateFirewalls/        │ │
-│  │      {設備名稱}/{年}/{月}/{日}/             │ │
-│  │        showrunning-config_{ID}.conf        │ │
-│  └────────────────────────────────────────────┘ │
-│                                                  │
-│  ┌────────────────────────────────────────────┐ │
-│  │  rconfig (既有系統)                         │ │
-│  │  - Reader 讀取完整備份檔                    │ │
-│  │  - 下載功能支援 .conf 檔案                  │ │
-│  └────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────┘
-            ▲
-            │ SFTP Upload (Port 2222)
-            │
-    ┌───────┴────────┐
-    │  Fortigate     │
-    │  (10 台)       │
-    │                │
-    │  execute backup config sftp
-    │    fw01-192.168.1.1-20260320.conf
-    └────────────────┘
++--------------------------------------------------+
+|         rconfig 主機 (Ubuntu 22.04)              |
+|                                                  |
+|  +--------------------------------------------+ |
+|  |  rconfig Fortigate Bridge (Docker)          | |
+|  |  Network: 192.168.254.0/24                  | |
+|  |                                             | |
+|  |  +----------+       +------------------+   | |
+|  |  |  SFTP    |       |  Watcher         |   | |
+|  |  |  :2222   |------>|  (Python)        |   | |
+|  |  +----------+ 上傳  |  - 監控上傳目錄  |   | |
+|  |                      |  - 查詢 rconfig  |   | |
+|  |                      |  - 轉存備份檔    |   | |
+|  |                      +------------------+   | |
+|  +--------------------------------------------+ |
+|                          |                       |
+|                          v 轉存到                |
+|  +--------------------------------------------+ |
+|  |  /var/www/html/rconfig/storage/app/         | |
+|  |    rconfig/data/FortigateFirewalls/          | |
+|  |      {設備名稱}/{YYYY}/{Mon}/{DD}/           | |
+|  |        show_{HHmm}.txt       (rconfig 格式) | |
+|  |        {原始檔名}.conf       (完整備份)      | |
+|  +--------------------------------------------+ |
++--------------------------------------------------+
+            ^
+            | SFTP Upload (Port 2222)
+            |
+    +----------------+
+    |  Fortigate     |
+    |  (11 台)       |
+    |                |
+    |  Automation Action:
+    |  execute backup config sftp
+    |    upload/{hostname}-{ip}-%%date%%.conf
+    |    172.16.5.124:2222 autoinfra
+    +----------------+
 ```
 
 ---
 
-## 🚀 快速開始
+## 設備清單
+
+### 運作中 (11 台)
+
+| 區域 | rconfig 設備名稱 | IP | Fortigate 型號 |
+|------|-----------------|-----|---------------|
+| 台灣彰化 HQ2 | TWCH-HQ2-101F | 172.16.11.2 | FortiGate 101F |
+| 台灣彰化 HQ2 | TWCH-HQ2-201F-01 | 172.16.11.3 | FortiGate 201F |
+| 台灣彰化 HQ2 | TWCH-PCN-301E | 172.16.11.4 | FortiGate 301E |
+| 台灣彰化 HQ2 | TWCH-HQ2-60E-IOT | 172.16.11.5 | FortiGate 60E |
+| 台灣台中 | TWTC-PA-101F | 172.23.127.9 | FortiGate 101F |
+| 台灣台中 | TW-TC-FortiGate-121G | 172.23.174.9 | FortiGate 121G |
+| 台灣台中 | TW-TC-UAIC-FW | 172.23.199.251 | FortiGate |
+| 台灣台北 | TW-TP-BaoYu-FortiGate60E | 172.23.94.9 | FortiGate 60E |
+| 台灣台北 | TW-TP-XinYi-FortiGate60E | 172.23.110.30 | FortiGate 60E |
+| 印度 | IN-Kavin-60E | 172.25.128.254 | FortiGate 60E |
+| 印度 | IN-VSP-60E | 172.25.136.254 | FortiGate 60E |
+
+### 已下架
+
+- IN-KK-60E
+- TW-CH-PCN-Firewall
+- TW-CH-PGT-Fortigate60E
+- TW-TC-FortiGate301E
+- TWTC-HQ-60E-IOT
+
+---
+
+## 快速開始
 
 ### 前置需求
 
-- ✅ Ubuntu 22.04 LTS
-- ✅ Docker 20.10+
-- ✅ Docker Compose 2.0+
-- ✅ rconfig 已安裝且運作中
+- Ubuntu 22.04 LTS
+- Docker 20.10+
+- Docker Compose V2 (`docker compose`，非 `docker-compose`)
+- rconfig 已安裝且運作中
 
 ### Step 1: 克隆專案
 
 ```bash
-# 在 rconfig 主機上執行
 cd /opt
-git clone https://github.com/yourusername/rconfig-fortigate-bridge.git
-cd rconfig-fortigate-bridge
+sudo git clone https://github.com/nox913106/DEV-rconfig-fortigate-bridge.git
+cd DEV-rconfig-fortigate-bridge
 ```
 
 ### Step 2: 配置環境變數
 
 ```bash
-# 複製範本
-cp .env.example .env
-
-# 編輯配置（重要！）
-nano .env
+# 建立 .env 檔案
+sudo nano .env
 ```
 
-**必須修改的參數**：
+**必要參數**：
 ```bash
-# rconfig 資料庫密碼（從 /var/www/html/rconfig/.env 取得）
-RCONFIG_DB_PASSWORD=maWH5iv7DECFtc6u  # 改成實際密碼
-
-# rconfig 安裝路徑（預設通常正確）
+RCONFIG_DB_HOST=192.168.254.1
+RCONFIG_DB_PORT=3306
+RCONFIG_DB_NAME=rconfig
+RCONFIG_DB_USER=pcc_rconfig
+RCONFIG_DB_PASSWORD=<rconfig 資料庫密碼>
 RCONFIG_PATH=/var/www/html/rconfig
+SFTP_PORT=2222
+LOG_LEVEL=INFO
 ```
 
-### Step 3: 設定 SSH 公鑰認證
+> **注意**：`RCONFIG_DB_HOST` 必須使用 Docker 橋接網路閘道 IP (`192.168.254.1`)，不能用 `localhost`。
+
+### Step 3: MariaDB 授權 Docker 容器連線
 
 ```bash
-# 產生 SSH 金鑰對
-ssh-keygen -t rsa -b 4096 -f ./ssh_keys/fortigate_rsa -N ""
-
-# 顯示公鑰（稍後需複製到 Fortigate）
-cat ./ssh_keys/fortigate_rsa.pub
+sudo mysql -u root
 ```
 
-**輸出範例**：
-```
-ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC... root@host
+```sql
+GRANT ALL PRIVILEGES ON rconfig.* TO 'pcc_rconfig'@'192.168.254.%' IDENTIFIED BY '<密碼>';
+FLUSH PRIVILEGES;
 ```
 
-### Step 4: 啟動服務
+### Step 4: 設定 UFW 防火牆
 
 ```bash
-# 建置並啟動 Docker 容器
-docker-compose up -d
+# Docker 容器存取 MariaDB
+sudo ufw allow from 192.168.254.0/24 to any port 3306 proto tcp comment 'Docker bridge to MariaDB'
+
+# Fortigate SFTP 白名單
+sudo bash << 'SCRIPT'
+IPS=(
+    "172.16.11.2" "172.16.11.3" "172.16.11.4" "172.16.11.5"
+    "172.23.127.9" "172.23.174.9" "172.23.199.251"
+    "172.23.94.9" "172.23.110.30"
+    "172.25.128.254" "172.25.136.254"
+)
+for ip in "${IPS[@]}"; do
+    ufw allow from $ip to any port 2222 proto tcp comment "Fortigate $ip"
+done
+SCRIPT
+```
+
+### Step 5: 啟動服務
+
+```bash
+sudo docker compose up -d --build
 
 # 檢查服務狀態
-docker-compose ps
-docker-compose logs -f watcher
+sudo docker compose ps
+sudo docker compose logs -f watcher
 ```
 
 **預期輸出**：
 ```
-✅ rconfig Fortigate Bridge - Watcher 啟動
-✅ 已連線到 rconfig 資料庫
-✅ Watcher 已啟動，開始監控 SFTP 上傳...
+rconfig Fortigate Bridge - Watcher 啟動
+已連線到 rconfig 資料庫
+Watcher 已啟動，開始監控 SFTP 上傳...
 ```
 
 ---
 
-## 🔧 Fortigate 設定
+## Fortigate 設定
 
-### Step 1: 設定 SSH 公鑰認證
+### 檔名格式
 
-```bash
-# 在 Fortigate CLI 執行
-config system admin
-    edit "sftp-backup"
-        set ssh-public-key1 "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC..."
-        set accprofile "super_admin"
-    next
-end
+Fortigate Automation Action 的 CLI 檔名必須遵循以下格式：
+
+```
+upload/{rconfig設備名稱}-{IP用破折號分隔}-%%date%%.conf
 ```
 
-### Step 2: 測試 SFTP 連線
+**Fortigate 會自動加上序列號前綴**（如 `FG201FT922913515_`），Watcher 會自動去除。
+
+**`%%date%%` 展開格式**：`YYYY-MM-DD`（例如 `2026-03-24`）
+
+### Automation Action CLI 指令 (11 台)
+
+#### 台灣彰化 HQ2 (172.16.11.x)
 
 ```bash
-# 在 Fortigate CLI 執行
-execute backup config sftp test-backup.conf <rconfig-ip>:2222 sftp-backup
+# TWCH-HQ2-101F (172.16.11.2)
+execute backup config sftp upload/TWCH-HQ2-101F-172-16-11-2-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+
+# TWCH-HQ2-201F-01 (172.16.11.3)
+execute backup config sftp upload/TWCH-HQ2-201F-01-172-16-11-3-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+
+# TWCH-PCN-301E (172.16.11.4)
+execute backup config sftp upload/TWCH-PCN-301E-172-16-11-4-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+
+# TWCH-HQ2-60E-IOT (172.16.11.5)
+execute backup config sftp upload/TWCH-HQ2-60E-IOT-172-16-11-5-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+```
+
+#### 台灣台中 (172.23.x.x)
+
+```bash
+# TWTC-PA-101F (172.23.127.9)
+execute backup config sftp upload/TWTC-PA-101F-172-23-127-9-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+
+# TW-TC-FortiGate-121G (172.23.174.9)
+execute backup config sftp upload/TW-TC-FortiGate-121G-172-23-174-9-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+
+# TW-TC-UAIC-FW (172.23.199.251)
+execute backup config sftp upload/TW-TC-UAIC-FW-172-23-199-251-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+```
+
+#### 台灣台北 (172.23.x.x)
+
+```bash
+# TW-TP-BaoYu-FortiGate60E (172.23.94.9)
+execute backup config sftp upload/TW-TP-BaoYu-FortiGate60E-172-23-94-9-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+
+# TW-TP-XinYi-FortiGate60E (172.23.110.30)
+execute backup config sftp upload/TW-TP-XinYi-FortiGate60E-172-23-110-30-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+```
+
+#### 印度 (172.25.x.x)
+
+```bash
+# IN-Kavin-60E (172.25.128.254)
+execute backup config sftp upload/IN-Kavin-60E-172-25-128-254-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+
+# IN-VSP-60E (172.25.136.254)
+execute backup config sftp upload/IN-VSP-60E-172-25-136-254-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
+```
+
+### Automation Action 設定方式
+
+在每台 Fortigate 的 Web UI 中：
+
+1. **Security Fabric** > **Automation** > **Create New**
+2. **Trigger**: Schedule (每日排程)
+3. **Action**: CLI Script
+4. 貼上對應的 `execute backup config sftp ...` 指令
+
+> **注意**：`%%date%%` 變數僅在 Automation Action 中展開，手動 CLI 執行不會展開。
+
+### 手動測試 SFTP 連線
+
+```bash
+# 在 Fortigate CLI 手動測試（使用硬編碼日期）
+execute backup config sftp upload/TWCH-HQ2-201F-01-172-16-11-3-20260324.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
 ```
 
 **成功訊息**：
 ```
 Please wait...
-Connect to ftp server <rconfig-ip>:2222 ...
-Backup config file to <rconfig-ip> via ftp successfully.
-```
-
-### Step 3: 設定自動排程
-
-```bash
-# 在 Fortigate CLI 執行（每日 02:00 備份）
-config system auto-script
-    edit "daily-config-backup"
-        set interval 86400
-        set start auto
-        set script "execute backup config sftp fw01-$(FGT_SERIAL_NUMBER)-$(FGT_HOSTNAME)-$(TIMESTAMP).conf <rconfig-ip>:2222 sftp-backup"
-    next
-end
-```
-
-**檔名格式要求**：
-```
-✅ fw01-192.168.1.1-20260320-143000.conf
-❌ backup.conf (無法解析設備資訊)
+Connect to sftp server 172.16.5.124:2222 ...
+Backup config file to 172.16.5.124 via sftp successfully.
 ```
 
 ---
 
-## 📂 目錄結構
+## 檔名解析邏輯
+
+Watcher 使用**反向解析**策略處理檔名：
 
 ```
-rconfig-fortigate-bridge/
+原始檔名: FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-2026-03-24.conf
+          |_______________|  |______________|  |__________|  |________|
+          序列號前綴(自動去除) hostname        IP(破折號)    %%date%%
+
+解析順序（從後向前）：
+1. 去除序列號前綴 (FG/FW/FL/FT 開頭 + 底線)
+2. 識別 timestamp：格式 A (20260324) 或 格式 B (2026-03-24)
+3. 取 4 段數字作為 IP (每段 <= 3 位)
+4. 剩餘部分 = hostname (用於查詢 rconfig 資料庫)
+```
+
+**支援的檔名格式**：
+| 格式 | 範例 | 來源 |
+|------|------|------|
+| 格式 A | `TWCH-HQ2-201F-01-172-16-11-3-20260324.conf` | 手動 CLI |
+| 格式 B | `TWCH-HQ2-201F-01-172-16-11-3-2026-03-24.conf` | Automation Action `%%date%%` |
+| 含前綴 | `FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-2026-03-24.conf` | Fortigate 自動加上 |
+
+---
+
+## 轉存結果
+
+每次備份產生兩個檔案，存放於 rconfig 目錄結構中：
+
+```
+/var/www/html/rconfig/storage/app/rconfig/data/
+  FortigateFirewalls/
+    TWCH-HQ2-201F-01/
+      2026/
+        Mar/
+          24/
+            show_0625.txt                                           <-- rconfig 格式（覆蓋）
+            FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-2026-03-24.conf  <-- 原始備份（保留）
+```
+
+- **`show_{HHmm}.txt`**：rconfig 可辨識的格式，同日同時間會覆蓋
+- **原始 `.conf` 檔**：完整保留 Fortigate 原始備份，含序列號前綴
+
+---
+
+## 目錄結構
+
+```
+DEV-rconfig-fortigate-bridge/
 ├── docker-compose.yml          # Docker 服務編排
+├── .env                        # 環境變數配置（不提交 Git）
 ├── .env.example                # 環境變數範本
-├── .env                        # 實際配置（不提交 Git）
 ├── README.md                   # 本文件
+├── DEPLOYMENT_PROGRESS.md      # 部署進度追蹤
 ├── watcher/                    # Watcher 服務
 │   ├── Dockerfile
 │   ├── requirements.txt        # Python 依賴
 │   └── bridge.py               # 核心轉存邏輯
-├── ssh_keys/                   # SSH 公鑰目錄
-│   ├── fortigate_rsa           # 私鑰（僅伺服器持有）
-│   └── fortigate_rsa.pub       # 公鑰（複製到 Fortigate）
+├── scripts/
+│   └── setup-ufw-fortigate.sh  # UFW 防火牆設定腳本
+├── ssh_keys/                   # SSH 金鑰目錄
 ├── data/
 │   └── INCOMING_TEMP/          # SFTP 上傳暫存目錄
 │       └── failed/             # 處理失敗的檔案
@@ -219,13 +350,12 @@ rconfig-fortigate-bridge/
 
 ---
 
-## 🔍 驗證測試
+## 驗證測試
 
 ### 1. 檢查 Docker 服務
 
 ```bash
-# 檢查容器狀態
-docker-compose ps
+sudo docker compose ps
 
 # 預期輸出
 NAME                     STATE     PORTS
@@ -236,33 +366,36 @@ rconfig-bridge-watcher   Up
 ### 2. 檢查 Watcher 日誌
 
 ```bash
-docker-compose logs -f watcher
+sudo docker compose logs watcher --tail 20
 ```
 
 **成功處理範例**：
 ```
-📥 開始處理: fw01-192.168.1.1-20260320-143000.conf
-   設備名稱: fw01
-   設備 ID: 123
-   目標路徑: /rconfig/.../FortigateFirewalls/fw01/2026/Mar/20/showrunning-config_123.conf
-✅ 成功轉存: fw01 → showrunning-config_123.conf
-   已清理暫存檔: fw01-192.168.1.1-20260320-143000.conf
+📥 開始處理: FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-2026-03-24.conf
+   去除序列號前綴: FG201FT922913515
+   設備名稱: TWCH-HQ2-201F-01
+   時間戳記: 20260324
+   設備 ID: 4
+   rconfig 檔案: show_0625.txt
+   備份檔案: FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-2026-03-24.conf
+✅ 已轉存為 rconfig 格式: show_0625.txt
+✅ 已保留原始備份: FG201FT922913515_TWCH-HQ2-201F-01-172-16-11-3-2026-03-24.conf
 ```
 
 ### 3. 檢查轉存結果
 
 ```bash
-# 查看 rconfig 目錄中的備份檔
-ls -lh /var/www/html/rconfig/storage/app/rconfig/data/FortigateFirewalls/
+# 查看轉存目錄
+ls -lh /var/www/html/rconfig/storage/app/rconfig/data/FortigateFirewalls/TWCH-HQ2-201F-01/2026/Mar/24/
 
-# 驗證檔案包含 metadata
-head -5 /var/www/html/rconfig/storage/app/rconfig/data/FortigateFirewalls/fw01/2026/Mar/20/showrunning-config_123.conf
+# 驗證 metadata
+head -5 /var/www/html/rconfig/storage/app/rconfig/data/FortigateFirewalls/TWCH-HQ2-201F-01/2026/Mar/24/show_0625.txt
 ```
 
 **預期輸出（包含 metadata）**：
 ```
-#config-version=FG201F-7.4.9-FW-build2829-250924:opmode=0:vdom=0:user=Tacacs_admin
-#conf_file_ver=16609656444747006
+#config-version=FG201F-7.4.9-FW-build2829-250924:opmode=0:vdom=0:user=daemon_admin
+#conf_file_ver=16611773863624424
 #buildno=2829
 #global_vdom=1
 config system global
@@ -270,86 +403,81 @@ config system global
 
 ---
 
-## 🛠️ 故障排除
+## 故障排除
 
-### 問題 1：Watcher 無法連線到資料庫
+### Watcher 無法連線到資料庫
 
-**錯誤訊息**：
 ```
-❌ 無法連線到 rconfig 資料庫: (2003, "Can't connect to MySQL server...")
+無法連線到 rconfig 資料庫: (2003, "Can't connect to MySQL server...")
 ```
 
-**解決方式**：
+**原因**：Docker 容器的 `localhost` 是容器自身，不是主機。
+
+**解決**：
 ```bash
-# 1. 檢查 .env 中的資料庫密碼
-cat .env | grep RCONFIG_DB_PASSWORD
+# 確認 .env 中 DB_HOST 設為 Docker 橋接閘道
+grep RCONFIG_DB_HOST .env
+# 應為: RCONFIG_DB_HOST=192.168.254.1
 
-# 2. 從 rconfig 配置檔確認正確密碼
-sudo cat /var/www/html/rconfig/.env | grep DB_PASSWORD
+# 確認 MariaDB 已授權 Docker 網段
+sudo mysql -u root -e "SELECT host, user FROM mysql.user WHERE user='pcc_rconfig';"
+# 應包含: 192.168.254.%
 
-# 3. 更新 .env 後重啟
-docker-compose restart watcher
+# 更新 .env 後必須 recreate（restart 不會重載 .env）
+sudo docker compose up -d
 ```
 
-### 問題 2：找不到設備
+### 找不到設備
 
-**錯誤訊息**：
 ```
-⚠️ 找不到設備: fw01
+找不到設備: HQ2-201F
 ```
 
-**解決方式**：
+**原因**：Automation Action CLI 的檔名 hostname 與 rconfig 設備名稱不一致。
+
+**解決**：確保檔名中的 hostname 部分完全等於 rconfig 的 `device_name`。
+
 ```bash
-# 1. 檢查 rconfig 資料庫中的設備名稱
-mysql -u pcc_rconfig -p rconfig -e "SELECT id, device_name FROM devices WHERE device_name LIKE 'fw%';"
-
-# 2. 確保 Fortigate 上傳的檔名與 rconfig 設備名稱一致
-# 範例：rconfig 中設備名為 "FW01-TAIPEI"，則檔名應為：
-# FW01-TAIPEI-192.168.1.1-20260320-143000.conf
+# 查詢 rconfig 設備名稱
+mysql -u pcc_rconfig -p rconfig -e "SELECT id, device_name FROM devices;"
 ```
 
-### 問題 3：檔案移至 failed 目錄
+### 檔案移至 failed 目錄
 
-**檢查失敗原因**：
 ```bash
-# 查看錯誤訊息
+# 查看錯誤原因
 cat data/INCOMING_TEMP/failed/*.error.txt
 
-# 常見原因
-# - 檔名格式錯誤
-# - 設備不存在於 rconfig
-# - 檔案權限問題
+# 常見原因：
+# - 檔名格式不符（缺少 IP 或 timestamp）
+# - 設備名稱不存在於 rconfig
+# - %%date%% 未展開（手動 CLI 不支援，僅 Automation Action 支援）
 ```
 
 ---
 
-## 📊 監控與維運
+## 監控與維運
 
 ### 日誌查看
 
 ```bash
-# 即時監控 Watcher 日誌
-docker-compose logs -f watcher
+# 即時監控
+sudo docker compose logs -f watcher
 
 # 查看歷史日誌
-cat logs/watcher.log
-
-# 查看最近 100 行
 tail -100 logs/watcher.log
 ```
 
-### 服務重啟
+### 服務管理
 
 ```bash
 # 重啟所有服務
-docker-compose restart
+sudo docker compose restart
 
-# 僅重啟 Watcher
-docker-compose restart watcher
-
-# 完整重建（更新程式碼後）
-docker-compose down
-docker-compose up -d --build
+# 更新程式碼後重建
+cd /opt/DEV-rconfig-fortigate-bridge
+sudo git pull
+sudo docker compose up -d --build
 ```
 
 ### 清理失敗檔案
@@ -364,62 +492,36 @@ find data/INCOMING_TEMP/failed/ -type f -mtime +7 -delete
 
 ---
 
-## 🔐 安全性建議
+## 安全性
 
-1. **SSH 金鑰管理**
-   ```bash
-   # 設定私鑰權限
-   chmod 600 ssh_keys/fortigate_rsa
-
-   # 定期輪換金鑰（建議每年一次）
-   ```
-
-2. **SFTP 埠號保護**
-   ```bash
-   # 使用防火牆限制來源 IP
-   sudo ufw allow from 192.168.1.0/24 to any port 2222
-   ```
-
-3. **資料庫密碼加密**
-   ```bash
-   # .env 檔案僅 root 可讀
-   chmod 600 .env
-   ```
+1. **UFW 防火牆**：SFTP Port 2222 僅允許白名單 IP 連入
+2. **Docker 網路隔離**：使用自訂橋接網路 `192.168.254.0/24`
+3. **SFTP 帳號隔離**：`autoinfra` 帳號僅用於 SFTP 上傳，與主機帳號獨立
+4. **`.env` 檔案權限**：`chmod 600 .env` 僅 root 可讀
 
 ---
 
-## 📝 常見問題 (FAQ)
+## FAQ
 
 ### Q1: 是否需要修改 rconfig 程式碼？
 
-**A**: 完全不需要！本專案僅轉存檔案到 rconfig 目錄，rconfig 無需任何修改。
+不需要。本專案僅轉存檔案到 rconfig 目錄，rconfig 無需任何修改。
 
-### Q2: 可以處理多台 Fortigate 嗎？
+### Q2: `%%date%%` 在手動 CLI 不展開？
 
-**A**: 可以！只要檔名包含設備名稱，Watcher 會自動識別並轉存到對應目錄。
+正常。`%%date%%` 僅在 Fortigate Automation Action 中展開為 `YYYY-MM-DD`。手動測試請使用硬編碼日期（如 `20260324`）。
 
-### Q3: 會覆蓋 rconfig 原本的備份嗎？
+### Q3: Fortigate 自動加的序列號前綴會影響嗎？
 
-**A**: 是的，會覆蓋同一天的備份檔。這樣確保 rconfig UI 下載到的永遠是包含 metadata 的完整備份。
+不會。Watcher 會自動去除 `FG`/`FW`/`FL`/`FT` 開頭的序列號前綴（如 `FG201FT922913515_`）。
 
-### Q4: 如何新增其他設備廠牌支援？
+### Q4: 兩台 Fortigate 同時上傳會衝突嗎？
 
-**A**: 目前僅支援 Fortigate。如需擴展，需修改 `watcher/bridge.py` 中的檔名解析邏輯。
-
----
-
-## 🤝 貢獻指南
-
-歡迎提交 Issue 或 Pull Request！
+不會。每台設備的 hostname 不同，會存入各自的 rconfig 目錄。
 
 ---
 
-## 📄 授權條款
-
-MIT License
-
----
-
-**最後更新**: 2026-03-20
+**最後更新**: 2026-03-24
 **適用 rconfig 版本**: v6.x
 **適用 Fortigate 版本**: 7.x (含以上)
+**部署目標**: stwrconfig6 (172.16.5.124)

@@ -46,6 +46,9 @@ services:
       INCOMING_DIR: /app/incoming
       RCONFIG_DATA_DIR: /rconfig/storage/app/rconfig/data
 
+      # 時區（與 rconfig 主機一致）
+      TZ: Asia/Taipei
+
       # 日誌設定
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
