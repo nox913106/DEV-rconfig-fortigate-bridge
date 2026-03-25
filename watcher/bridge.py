@@ -191,7 +191,7 @@ class FortigateBridge:
             return False
 
         hostname = parsed['hostname']
-        timestamp = parsed['timestamp']  # 格式：20260320-143000
+        timestamp = parsed['timestamp']
         logger.info(f"   設備名稱: {hostname}")
         logger.info(f"   時間戳記: {timestamp}")
 
@@ -215,34 +215,12 @@ class FortigateBridge:
         )
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # 4. 解析時間戳記取得 HHmm
-        # 支援多種格式：
-        # - 20260320-143000 → 1430
-        # - 20260320153045 → 1530
-        # - 20260320 → 使用當前時間
-        try:
-            # 移除所有破折號，取得純數字字串
-            timestamp_clean = timestamp.replace('-', '')
-
-            if len(timestamp_clean) >= 12:
-                # 格式：YYYYMMDDHHmmss (14 位) 或 YYYYMMDDHHmm (12 位)
-                hhmm = timestamp_clean[8:12]  # 取第 9-12 位 → HHmm
-            elif len(timestamp_clean) == 8:
-                # 格式：YYYYMMDD (僅日期，無時間)
-                logger.warning(f"⚠️ 時間戳記僅包含日期，使用當前時間")
-                hhmm = now.strftime('%H%M')
-            else:
-                raise ValueError(f"無法識別的時間戳記格式: {timestamp}")
-
-            logger.info(f"   解析時間: {hhmm[:2]}:{hhmm[2:]}")
-
-        except Exception as e:
-            logger.warning(f"⚠️ 無法解析時間戳記 ({timestamp}): {e}，使用當前時間")
-            hhmm = now.strftime('%H%M')
+        # 4. rconfig 格式檔名（固定名稱，對齊 rconfig 備份排程）
+        RCONFIG_FILENAME = "show_1930.txt"
 
         # 5. 生成兩個檔案
-        # (a) rconfig 格式：show_{HHmm}.txt (覆蓋現有備份)
-        rconfig_file = target_dir / f"show_{hhmm}.txt"
+        # (a) rconfig 格式：固定檔名，覆蓋 rconfig 排程產生的備份
+        rconfig_file = target_dir / RCONFIG_FILENAME
 
         # (b) 原始檔案：保留完整檔名作為備份
         backup_file = target_dir / file_path.name
