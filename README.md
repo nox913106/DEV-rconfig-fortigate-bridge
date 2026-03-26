@@ -204,6 +204,12 @@ upload/{rconfig設備名稱}-{IP用破折號分隔}-%%date%%.conf
 
 ### Automation Action CLI 指令 (11 台)
 
+Daily config.conf backup
+
+Daily backup at 2000 sch.
+
+Exec sftp daily backup
+
 #### 台灣彰化 HQ2 (172.16.11.x)
 
 ```bash
@@ -220,6 +226,12 @@ execute backup config sftp upload/TWCH-PCN-301E-172-16-11-4-%%date%%.conf 172.16
 execute backup config sftp upload/TWCH-HQ2-60E-IOT-172-16-11-5-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
 ```
 
+Daily config.conf backup
+
+Daily backup at 2000 sch.
+
+Exec sftp daily backup
+
 #### 台灣台中 (172.23.x.x)
 
 ```bash
@@ -233,6 +245,12 @@ execute backup config sftp upload/TW-TC-FortiGate-121G-172-23-174-9-%%date%%.con
 execute backup config sftp upload/TW-TC-UAIC-FW-172-23-199-251-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
 ```
 
+Daily config.conf backup
+
+Daily backup at 2000 sch.
+
+Exec sftp daily backup
+
 #### 台灣台北 (172.23.x.x)
 
 ```bash
@@ -242,6 +260,12 @@ execute backup config sftp upload/TW-TP-BaoYu-FortiGate60E-172-23-94-9-%%date%%.
 # TW-TP-XinYi-FortiGate60E (172.23.110.30)
 execute backup config sftp upload/TW-TP-XinYi-FortiGate60E-172-23-110-30-%%date%%.conf 172.16.5.124:2222 autoinfra #%2021Radiu$PcC
 ```
+
+Daily config.conf backup
+
+Daily backup at 2000 sch.
+
+Exec sftp daily backup
 
 #### 印度 (172.25.x.x)
 
