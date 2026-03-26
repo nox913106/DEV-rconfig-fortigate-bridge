@@ -67,8 +67,18 @@ class RconfigDB:
             logger.error(f"❌ 無法連線到 rconfig 資料庫: {e}")
             return False
 
+    def ensure_connection(self):
+        """確保資料庫連線存活，逾時自動重連"""
+        try:
+            self.conn.ping(reconnect=True)
+        except Exception:
+            logger.warning("⚠️ 資料庫連線已斷開，嘗試重新連線...")
+            return self.connect()
+        return True
+
     def get_device_by_name(self, device_name):
         """根據設備名稱查詢設備資訊"""
+        self.ensure_connection()
         try:
             with self.conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
@@ -82,6 +92,7 @@ class RconfigDB:
 
     def get_latest_config_id(self, device_id):
         """查詢設備最新的 config ID"""
+        self.ensure_connection()
         try:
             with self.conn.cursor() as cursor:
                 cursor.execute(
@@ -326,6 +337,14 @@ def main():
     observer.start()
 
     logger.info("✅ Watcher 已啟動，開始監控 SFTP 上傳...")
+
+    # 4. 啟動時掃描：處理已存在的 .conf 檔案（含重啟後殘留、從 failed/ 搬回的檔案）
+    existing_files = sorted(INCOMING_DIR.glob('*.conf'))
+    if existing_files:
+        logger.info(f"📂 發現 {len(existing_files)} 個待處理檔案，開始處理...")
+        for f in existing_files:
+            bridge.process_file(f)
+        logger.info("📂 啟動掃描完成")
 
     try:
         while True:
