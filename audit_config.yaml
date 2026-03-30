@@ -1,0 +1,34 @@
+# ==========================================
+# FortiGate 帳號稽核 - 白名單設定
+# ==========================================
+#
+# 合規判定優先順序：
+#   1. 帳號名稱 ∈ (global_whitelist ∪ firewall_exceptions[hostname]) → 合規
+#   2. 帳號的 accprofile ∈ compliant_profiles → 合規
+#   3. 以上皆非 → 不合規
+
+# ---- 方式一：按帳號名稱（所有防火牆共用）----
+global_whitelist:
+  system_admin:
+    - fg
+    - twspadmin
+    - Tacacs_admin
+  api_user:
+    - API_Read
+
+# ---- 方式二：按 accprofile 自動合規 ----
+# 不論帳號名稱為何，只要其 accprofile 在此清單中即視為合規
+# 適用於 guest WiFi 等每台防火牆名稱不同但 profile 相同的帳號
+compliant_profiles:
+  # - "guest_admin"
+  # - "wifi_portal"
+
+# ---- 個別防火牆例外帳號 ----
+# key 為防火牆 hostname（從 config system global 的 set hostname 解析取得）
+firewall_exceptions:
+  # "FW-TW-HQ-01":
+  #   system_admin:
+  #     - local_backup_admin
+  # "FW-IN-MUM-01":
+  #   api_user:
+  #     - API_India_Readonly
