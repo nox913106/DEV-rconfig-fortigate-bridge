@@ -3,20 +3,28 @@
 # ==========================================
 #
 # 用法：
-#   python -m audit.main --config-dir /path/to/configs
-#   python -m audit.main --config-dir /path/to/configs --output report.json
-#   python -m audit.main --config-dir /path/to/configs --config /custom/audit_config.yaml
+#
+#   # 掃描平層目錄（手動備份）
+#   python -m audit.main --config-dir /tmp/audit_input/
+#
+#   # 直接掃描 rconfig 目錄，自動取每台設備最新備份
+#   python -m audit.main --rconfig-dir /var/www/html/rconfig/storage/app/rconfig/data/FortigateFirewalls/
+#
+#   # 輸出 JSON 報告
+#   python -m audit.main --rconfig-dir /var/.../FortigateFirewalls/ --output /tmp/report.json
 #
 
 import argparse
 import json
 import logging
 import sys
+import tempfile
+import shutil
 from pathlib import Path
 
 from .auditor import AdminAuditor
 
-# 預設分類設定檔與 main.py 同目錄（audit/audit_config.yaml）
+# 分類設定檔預設與 main.py 同目錄（audit/audit_config.yaml）
 _DEFAULT_CONFIG = Path(__file__).parent / 'audit_config.yaml'
 
 
@@ -28,15 +36,54 @@ def setup_logging(log_level: str) -> None:
     )
 
 
+def collect_latest_configs(rconfig_dir: Path, tmp_dir: Path, logger) -> int:
+    """
+    從 rconfig FortigateFirewalls 目錄結構中，取每台設備最新的 show_*.txt，
+    複製到 tmp_dir（平層），回傳複製成功的台數。
+
+    目錄結構：
+        {rconfig_dir}/{device_name}/{YYYY}/{Mon}/{DD}/show_{HHmm}.txt
+    """
+    if not rconfig_dir.is_dir():
+        logger.error(f"❌ rconfig 目錄不存在: {rconfig_dir}")
+        return 0
+
+    count = 0
+    for device_dir in sorted(rconfig_dir.iterdir()):
+        if not device_dir.is_dir():
+            continue
+
+        # 找出所有 show_*.txt，依路徑排序取最新（路徑包含年月日，字串排序即時間排序）
+        candidates = sorted(device_dir.rglob('show_*.txt'))
+        if not candidates:
+            logger.warning(f"⚠️ {device_dir.name}: 沒有找到備份檔案，略過")
+            continue
+
+        latest = candidates[-1]
+        dest = tmp_dir / f"{device_dir.name}.txt"
+        shutil.copy2(latest, dest)
+        logger.debug(f"📋 {device_dir.name}: 使用 {latest.relative_to(rconfig_dir)}")
+        count += 1
+
+    return count
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description='FortiGate 帳號清冊工具 - 掃描 config 檔案，分類帳號，輸出 JSON 報告',
+        description='FortiGate 帳號清冊工具 - 分類帳號角色，輸出 Grafana 相容 JSON 報告',
     )
-    parser.add_argument(
+
+    # 輸入來源（二擇一）
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument(
         '--config-dir',
-        required=True,
-        help='FortiGate config 檔案目錄路徑',
+        help='平層 config 目錄（每台一個 .conf/.txt 檔案）',
     )
+    source_group.add_argument(
+        '--rconfig-dir',
+        help='rconfig FortigateFirewalls 目錄，自動取每台設備最新備份',
+    )
+
     parser.add_argument(
         '--config',
         default=str(_DEFAULT_CONFIG),
@@ -60,14 +107,32 @@ def main():
     logger = logging.getLogger('FortigateAudit')
     logger.info("🚀 FortiGate 帳號清冊工具啟動")
 
-    config_dir = Path(args.config_dir)
-    if not config_dir.is_dir():
-        logger.error(f"❌ config 目錄不存在: {config_dir}")
-        sys.exit(1)
+    # ---- 決定掃描目錄 ----
+    tmp_dir = None
+    if args.rconfig_dir:
+        rconfig_dir = Path(args.rconfig_dir)
+        tmp_dir = Path(tempfile.mkdtemp(prefix='fg_audit_'))
+        logger.info(f"📂 rconfig 模式：從 {rconfig_dir} 收集最新備份")
+        count = collect_latest_configs(rconfig_dir, tmp_dir, logger)
+        if count == 0:
+            logger.error("❌ 沒有收集到任何備份檔案")
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            sys.exit(1)
+        logger.info(f"✅ 已收集 {count} 台設備的最新備份")
+        scan_dir = tmp_dir
+    else:
+        scan_dir = Path(args.config_dir)
+        if not scan_dir.is_dir():
+            logger.error(f"❌ config 目錄不存在: {scan_dir}")
+            sys.exit(1)
 
     # ---- 執行清冊 ----
-    auditor = AdminAuditor(Path(args.config))
-    report = auditor.audit_directory(config_dir)
+    try:
+        auditor = AdminAuditor(Path(args.config))
+        report = auditor.audit_directory(scan_dir)
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # ---- 輸出報告 ----
     report_json = json.dumps(report, ensure_ascii=False, indent=2)
