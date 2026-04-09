@@ -85,12 +85,12 @@ def main():
         print(report_json)
 
     # ---- 回傳退出碼 ----
-    non_compliant = report['overall']['non_compliant_accounts']
-    if non_compliant > 0:
-        logger.warning(f"⚠️ 發現 {non_compliant} 個不合規帳號")
-        sys.exit(2)  # 退出碼 2 = 有不合規帳號（可用於排程告警判斷）
+    unknown_count = report['totals']['unknown']
+    if unknown_count > 0:
+        logger.warning(f"⚠️ 發現 {unknown_count} 個需關注帳號，請確認是否授權")
+        sys.exit(2)  # 退出碼 2 = 有需關注帳號（可用於排程告警判斷）
 
-    logger.info("✅ 所有帳號皆合規")
+    logger.info("✅ 所有帳號已分類完成，無需關注帳號")
     sys.exit(0)
 
 

@@ -1,9 +1,8 @@
 # ==========================================
-# FortiGate 帳號稽核引擎
-# 白名單比對 + JSON 報告輸出
+# FortiGate 帳號清冊引擎
+# 分類統計 + Grafana 相容 JSON 輸出
 # ==========================================
 
-import json
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -20,213 +19,151 @@ TW_TZ = timezone(timedelta(hours=8))
 # 支援的 config 副檔名
 CONFIG_EXTENSIONS = {'.conf', '.txt'}
 
+# 帳號分類定義（用於報告標籤與欄位順序）
+CATEGORIES = ['local_rw', 'local_ro', 'remote_rw', 'remote_guest', 'api_ro', 'unknown']
+
+CATEGORY_LABELS = {
+    'local_rw':     '本機 R/W 管理員',
+    'local_ro':     '本機 RO 管理員',
+    'remote_rw':    '遠端 R/W 管理員',
+    'remote_guest': 'Guest Wi-Fi 管理員',
+    'api_ro':       'API RO 管理員',
+    'unknown':      '未知帳號',
+}
+
 
 class AdminAuditor:
-    """FortiGate 帳號稽核引擎"""
+    """FortiGate 帳號清冊引擎"""
 
-    def __init__(self, whitelist_path: Path):
-        """
-        載入白名單設定檔。
+    def __init__(self, config_path: Path):
+        self.config_path = Path(config_path)
+        self._cfg = self._load_config()
 
-        Args:
-            whitelist_path: audit_config.yaml 路徑
-        """
-        self.whitelist_path = Path(whitelist_path)
-        self.config = self._load_whitelist()
+        # 建立 name → category 反查表
+        named = self._cfg.get('account_categories', {}).get('named_accounts', {})
+        self._name_to_category: dict[str, str] = {}
+        for category, names in named.items():
+            for name in (names or []):
+                self._name_to_category[name] = category
 
-    def _load_whitelist(self) -> dict:
-        """載入並驗證白名單 YAML 設定"""
+        # 建立 remote_group → category 反查表
+        group_cats = self._cfg.get('account_categories', {}).get('remote_group_categories', {})
+        self._group_to_category: dict[str, str] = {}
+        for category, groups in group_cats.items():
+            for group in (groups or []):
+                self._group_to_category[group] = category
+
+    def _load_config(self) -> dict:
         try:
-            with open(self.whitelist_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-
-            if not config or 'global_whitelist' not in config:
-                logger.warning("⚠️ 白名單設定檔缺少 global_whitelist，使用空白名單")
-                return {
-                    'global_whitelist': {},
-                    'compliant_profiles': [],
-                    'firewall_exceptions': {},
-                }
-
-            logger.info(f"✅ 載入白名單: {self.whitelist_path.name}")
-            return config
-
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                cfg = yaml.safe_load(f)
+            logger.info(f"✅ 載入分類設定: {self.config_path.name}")
+            return cfg or {}
         except FileNotFoundError:
-            logger.error(f"❌ 找不到白名單設定檔: {self.whitelist_path}")
-            return {
-                'global_whitelist': {},
-                'compliant_profiles': [],
-                'firewall_exceptions': {},
-            }
+            logger.error(f"❌ 找不到分類設定檔: {self.config_path}")
+            return {}
         except yaml.YAMLError as e:
-            logger.error(f"❌ 白名單 YAML 格式錯誤: {e}")
-            return {
-                'global_whitelist': {},
-                'compliant_profiles': [],
-                'firewall_exceptions': {},
-            }
+            logger.error(f"❌ 分類設定 YAML 格式錯誤: {e}")
+            return {}
 
-    def get_allowed_remote_groups(self, hostname: str) -> set:
+    def categorize(self, account: dict, account_type: str) -> str:
         """
-        取得該防火牆允許的 remote-group 清單。
-        只有明確列在 firewall_exceptions 中的防火牆才允許 remote-auth 帳號。
+        判斷帳號所屬分類。
 
-        Args:
-            hostname: 防火牆 hostname
-
-        Returns:
-            允許的 remote-group 名稱 set（空 set 表示不允許任何 remote-auth 帳號）
+        優先順序：
+        1. api_user 區段的帳號 → api_ro
+        2. 帳號名稱在 named_accounts → 對應分類
+        3. remote_group 在 remote_group_categories → 對應分類
+        4. 以上皆不符 → unknown
         """
-        exceptions = self.config.get('firewall_exceptions', {})
-        if exceptions and hostname in exceptions:
-            groups = exceptions[hostname].get('allowed_remote_groups', [])
-            return set(groups)
-        return set()
+        if account_type == 'api_user':
+            return 'api_ro'
 
-    def get_whitelist(self, hostname: str, account_type: str) -> set:
-        """
-        取得合併後的名稱白名單（global + exceptions）。
+        name = account.get('name', '')
+        if name in self._name_to_category:
+            return self._name_to_category[name]
 
-        Args:
-            hostname: 防火牆 hostname
-            account_type: 'system_admin' 或 'api_user'
+        remote_group = account.get('remote_group')
+        if remote_group and remote_group in self._group_to_category:
+            return self._group_to_category[remote_group]
 
-        Returns:
-            合規帳號名稱的 set
-        """
-        global_list = self.config.get('global_whitelist', {}).get(account_type, [])
-        allowed = set(global_list)
-
-        exceptions = self.config.get('firewall_exceptions', {})
-        if exceptions and hostname in exceptions:
-            fw_list = exceptions[hostname].get(account_type, [])
-            allowed.update(fw_list)
-
-        return allowed
-
-    def get_compliant_profiles(self) -> set:
-        """取得合規 accprofile 清單"""
-        profiles = self.config.get('compliant_profiles', [])
-        return set(profiles) if profiles else set()
-
-    def _is_compliant(self, name: str, accprofile: str | None,
-                      remote_auth: bool, remote_group: str | None,
-                      whitelist: set, compliant_profiles: set,
-                      allowed_remote_groups: set) -> tuple[bool, str]:
-        """
-        判斷帳號是否合規。
-
-        判定優先順序：
-        1. 帳號名稱在白名單中 → 合規（依據：名稱白名單）
-        2. accprofile 在合規 profile 清單中 → 合規（依據：profile 白名單）
-        3. remote-group 在該防火牆允許清單中 → 合規（依據：remote-group）
-           注意：不要求 remote_auth=True，因為 ciscoconfparse2 不保證能解析此 flag
-        4. 以上皆非 → 不合規
-
-        Returns:
-            (is_compliant, reason)
-        """
-        if name in whitelist:
-            return True, 'whitelisted_name'
-        if accprofile and compliant_profiles and accprofile in compliant_profiles:
-            return True, 'compliant_profile'
-        if remote_group and remote_group in allowed_remote_groups:
-            return True, 'allowed_remote_group'
-        return False, 'non_compliant'
+        return 'unknown'
 
     def audit_single(self, config_path: Path) -> dict | None:
         """
-        稽核單一防火牆 config 檔案。
-
-        Args:
-            config_path: FortiGate config 檔案路徑
+        解析單一 config 檔案，回傳該防火牆的帳號清冊。
 
         Returns:
-            結構化稽核結果 dict，或 None（解析失敗時）
+            {
+                "hostname": "TWCH-HQ2-201F-01",
+                "config_file": "TWCH-HQ2-201F-01.txt",
+                "counts": {"local_rw": 1, "local_ro": 1, ...},
+                "total": 10,
+                "accounts": [...]   ← 扁平化帳號清單（供 Grafana 用）
+            }
         """
         parsed = parse_config_file(config_path)
         if parsed is None:
             return None
 
         hostname = parsed['hostname']
-        compliant_profiles = self.get_compliant_profiles()
-        allowed_remote_groups = self.get_allowed_remote_groups(hostname)
-        accounts = {}
-        total = 0
-        compliant_count = 0
-        non_compliant_count = 0
+        counts = {cat: 0 for cat in CATEGORIES}
+        accounts = []
 
         for account_type in ('system_admin', 'api_user'):
-            whitelist = self.get_whitelist(hostname, account_type)
-            account_list = []
-
             for account in parsed[account_type]:
-                name = account['name']
-                accprofile = account['accprofile']
-                remote_auth = account.get('remote_auth', False)
-                remote_group = account.get('remote_group')
+                category = self.categorize(account, account_type)
+                counts[category] += 1
 
-                is_compliant, reason = self._is_compliant(
-                    name, accprofile, remote_auth, remote_group,
-                    whitelist, compliant_profiles, allowed_remote_groups
-                )
-
-                account_list.append({
-                    'name': name,
-                    'accprofile': accprofile,
-                    'remote_auth': remote_auth,
-                    'remote_group': remote_group,
-                    'compliant': is_compliant,
-                    'reason': reason,
+                accounts.append({
+                    'firewall':       hostname,
+                    'config_file':    config_path.name,
+                    'account_type':   account_type,
+                    'name':           account['name'],
+                    'category':       category,
+                    'category_label': CATEGORY_LABELS[category],
+                    'accprofile':     account.get('accprofile'),
+                    'remote_group':   account.get('remote_group'),
                 })
-                total += 1
-                if is_compliant:
-                    compliant_count += 1
-                else:
-                    non_compliant_count += 1
+
+                if category == 'unknown':
                     logger.warning(
-                        f"⚠️ 不合規帳號: [{hostname}] {account_type}/{name} "
-                        f"(accprofile={accprofile}, remote_group={remote_group})"
+                        f"⚠️ 未知帳號: [{hostname}] {account['name']} "
+                        f"(accprofile={account.get('accprofile')}, "
+                        f"remote_group={account.get('remote_group')})"
                     )
 
-            accounts[account_type] = account_list
-
-        result = {
-            'hostname': hostname,
-            'config_file': config_path.name,
-            'accounts': accounts,
-            'summary': {
-                'total': total,
-                'compliant': compliant_count,
-                'non_compliant': non_compliant_count,
-                'is_compliant': non_compliant_count == 0,
-            },
-        }
-
-        status = "✅" if result['summary']['is_compliant'] else "❌"
+        total = sum(counts.values())
+        status = "❌" if counts['unknown'] > 0 else "✅"
         logger.info(
-            f"{status} {hostname}: "
-            f"{total} 帳號 ({compliant_count} 合規 / {non_compliant_count} 不合規)"
+            f"{status} {hostname}: {total} 帳號 "
+            f"(local={counts['local_rw']+counts['local_ro']}, "
+            f"remote_rw={counts['remote_rw']}, "
+            f"guest={counts['remote_guest']}, "
+            f"api={counts['api_ro']}, "
+            f"unknown={counts['unknown']})"
         )
 
-        return result
+        return {
+            'hostname':    hostname,
+            'config_file': config_path.name,
+            'counts':      counts,
+            'total':       total,
+        }, accounts
 
     def audit_directory(self, config_dir: Path) -> dict:
         """
-        掃描目錄下所有 config 檔案，產生完整稽核報告。
+        掃描目錄下所有 config 檔案，產生完整帳號清冊報告。
 
-        Args:
-            config_dir: 包含 FortiGate config 檔案的目錄
-
-        Returns:
-            完整稽核報告 dict（適配 Grafana JSON Data Source）
+        輸出格式（Grafana Infinity 外掛相容）：
+        {
+            "scan_time": "...",
+            "firewalls": [...],   ← 每台一列，含各分類數量（統計表格用）
+            "accounts": [...],    ← 每個帳號一列（清單表格用）
+            "totals": {...}       ← 全域加總
+        }
         """
         config_dir = Path(config_dir)
-
-        if not config_dir.is_dir():
-            logger.error(f"❌ 目錄不存在: {config_dir}")
-            return self._empty_report(str(config_dir))
-
         config_files = sorted(
             f for f in config_dir.iterdir()
             if f.is_file() and f.suffix in CONFIG_EXTENSIONS
@@ -239,51 +176,48 @@ class AdminAuditor:
         logger.info(f"📂 掃描 {len(config_files)} 個 config 檔案: {config_dir}")
 
         firewalls = []
+        all_accounts = []
+        totals = {cat: 0 for cat in CATEGORIES}
+        totals['total_accounts'] = 0
+        totals['total_firewalls'] = 0
+
         for config_file in config_files:
             result = self.audit_single(config_file)
-            if result:
-                firewalls.append(result)
+            if result is None:
+                continue
+            fw_summary, accounts = result
 
-        # 彙總統計
-        total_fw = len(firewalls)
-        compliant_fw = sum(1 for fw in firewalls if fw['summary']['is_compliant'])
-        total_accounts = sum(fw['summary']['total'] for fw in firewalls)
-        non_compliant_accounts = sum(
-            fw['summary']['non_compliant'] for fw in firewalls
+            firewalls.append(fw_summary)
+            all_accounts.extend(accounts)
+
+            for cat in CATEGORIES:
+                totals[cat] += fw_summary['counts'][cat]
+            totals['total_accounts'] += fw_summary['total']
+            totals['total_firewalls'] += 1
+
+        unknown_total = totals['unknown']
+        logger.info(
+            f"📊 清冊完成: {totals['total_firewalls']} 台防火牆, "
+            f"{totals['total_accounts']} 帳號"
+            + (f", ⚠️ {unknown_total} 個未知帳號需確認" if unknown_total else "")
         )
 
-        report = {
-            'scan_time': datetime.now(TW_TZ).isoformat(),
-            'config_directory': str(config_dir),
-            'firewalls': firewalls,
-            'overall': {
-                'total_firewalls': total_fw,
-                'compliant_firewalls': compliant_fw,
-                'non_compliant_firewalls': total_fw - compliant_fw,
-                'total_accounts': total_accounts,
-                'non_compliant_accounts': non_compliant_accounts,
-            },
+        return {
+            'scan_time':    datetime.now(TW_TZ).isoformat(),
+            'config_dir':   str(config_dir),
+            'firewalls':    firewalls,
+            'accounts':     all_accounts,
+            'totals':       totals,
         }
 
-        logger.info(
-            f"📊 稽核完成: {total_fw} 台防火牆, "
-            f"{total_accounts} 帳號, "
-            f"{non_compliant_accounts} 不合規"
-        )
-
-        return report
-
     def _empty_report(self, config_dir: str) -> dict:
-        """產生空的稽核報告"""
         return {
-            'scan_time': datetime.now(TW_TZ).isoformat(),
-            'config_directory': config_dir,
-            'firewalls': [],
-            'overall': {
-                'total_firewalls': 0,
-                'compliant_firewalls': 0,
-                'non_compliant_firewalls': 0,
+            'scan_time':  datetime.now(TW_TZ).isoformat(),
+            'config_dir': config_dir,
+            'firewalls':  [],
+            'accounts':   [],
+            'totals':     {cat: 0 for cat in CATEGORIES} | {
                 'total_accounts': 0,
-                'non_compliant_accounts': 0,
+                'total_firewalls': 0,
             },
         }

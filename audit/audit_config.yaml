@@ -1,94 +1,32 @@
 # ==========================================
-# FortiGate 帳號稽核白名單設定
+# FortiGate 帳號分類設定
 # ==========================================
 #
-# 稽核邏輯（優先順序）：
-#   1. 帳號名稱在 global_whitelist 或 firewall_exceptions 中 → 合規
-#   2. remote-group 在該防火牆的 allowed_remote_groups 中 → 合規
-#   3. 以上皆非 → 不合規（輸出告警）
-#
-# 重要說明：
-#   - firewall_exceptions 的 key 必須使用 config 檔內 "set hostname" 的實際值，
-#     不是 rconfig 的設備名稱
-#   - compliant_profiles 保留為空，強制以名稱或 remote-group 為唯一合規依據
+# 分類優先順序：
+#   1. 帳號名稱符合 named_accounts → 直接分類
+#   2. remote-group 符合 remote_group_categories → 依 group 分類
+#   3. 以上皆不符合 → unknown（需人工確認）
 
-# ---- 全域白名單（所有防火牆皆適用） ----
-global_whitelist:
+account_categories:
 
-  # FortiGate 本機管理員（config system admin）
-  system_admin:
-    - fg              # 本機 R/W 管理員（super_admin profile）
-    - twspadmin       # 本機 RO 管理員（reviewer profile）
-    - Tacacs_admin    # TACACS+ 遠端 R/W 管理員（台灣各站）
-    - Tacacs-admin    # TACACS+ 遠端 R/W 管理員（印度站，命名略異）
+  # 優先級 1：已知固定帳號，依名稱直接分類
+  named_accounts:
+    local_rw:           # 本機 R/W 管理員（super_admin profile）
+      - fg
+    local_ro:           # 本機 RO 管理員（reviewer profile）
+      - twspadmin
+    remote_rw:          # 遠端 R/W 管理員（TACACS+）
+      - Tacacs_admin    # 台灣站
+      - Tacacs-admin    # 印度站（命名略異）
+    api_ro:             # REST API RO 管理員
+      - API_Read
 
-  # REST API 使用者（config system api-user）
-  api_user:
-    - API_Read        # REST API RO（reviewer profile）
-
-# ---- 合規 Profile 清單（刻意留空） ----
-compliant_profiles: []
-
-# ---- 防火牆個別例外 ----
-#
-# allowed_remote_groups：
-#   允許指定 remote-group 的個人 LDAP 帳號通過稽核。
-#   Key 必須使用 config 內的實際 hostname（set hostname 的值）。
-#   未列出的防火牆不允許任何 remote-group 帳號（TWCH-HQ2-101F-1、TWCH-HQ2-60E-IOT）。
-#
-firewall_exceptions:
-
-  # 台灣彰化 HQ2
-  TWCH-HQ2-201F-01:
-    allowed_remote_groups:
-      - "Guest Admin"         # Guest Wi-Fi 管理員（個人 LDAP 帳號）
-
-  TWCH-PCN-301E:
-    allowed_remote_groups:
+  # 優先級 2：個人 LDAP 帳號，依 remote-group 分類
+  # （帳號名稱隨人員異動，不能用名稱白名單）
+  remote_group_categories:
+    remote_guest:       # Guest Wi-Fi 管理員
       - "Guest Admin"
-      - "Captive Portal-LDAP"
-
-  TWCH-PGT-301E:
-    allowed_remote_groups:
-      - "Guest Admin"
-      - "Captive Portal-LDAP"
-
-  # 台灣台中
-  TWTC-HQ-121G:             # rconfig 設備名: TW-TC-FortiGate-121G
-    allowed_remote_groups:
-      - "Guest_admin"         # 底線版本，此台命名不同
-      - "Guest Admin"
-      - "Captive Portal-LDAP"
-
-  TW-TC-UAIC-61F:           # rconfig 設備名: TW-TC-UAIC-FW
-    allowed_remote_groups:
-      - "Guest_admin"
-      - "Guest Admin"
-      - "Captive Portal-LDAP"
-
-  TWTC-PA-101F:
-    allowed_remote_groups:
-      - "Guest Admin"
-      - "Captive Portal-LDAP"
-
-  # 台灣台北
-  TW-TP-BaoYu-60E:          # rconfig 設備名: TW-TP-BaoYu-FortiGate60E
-    allowed_remote_groups:
-      - "Guest Admin"
-      - "Captive Portal-LDAP"
-
-  TWTP-SY-60E:              # rconfig 設備名: TW-TP-XinYi-FortiGate60E
-    allowed_remote_groups:
-      - "Guest Admin"
-      - "Captive Portal-LDAP"
-
-  # 印度
-  IN-Kavin-60E:
-    allowed_remote_groups:
-      - "Captive Portal-ID"   # 印度 Kavin 站使用
-      - "Captive Portal-LDAP"
-
-  IN_VSP-71F:               # rconfig 設備名: IN-VSP-60E
-    allowed_remote_groups:
-      - "Captive Portal-AWS"  # 印度 VSP 站使用
-      - "Captive Portal-LDAP"
+      - "Guest_admin"           # 台中 121G 命名略異
+      - "Captive Portal-LDAP"   # 部分站點使用
+      - "Captive Portal-ID"     # 印度 Kavin
+      - "Captive Portal-AWS"    # 印度 VSP
