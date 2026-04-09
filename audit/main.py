@@ -92,20 +92,42 @@ def get_active_devices_from_db(logger) -> set[str] | None:
         return None
 
 
+def parse_backup_time(path: Path) -> str | None:
+    """
+    從備份路徑解析資料更新時間。
+    路徑格式: .../FortigateFirewalls/{device}/{YYYY}/{Mon}/{DD}/show_{HHmm}.txt
+    回傳格式: "2026-Apr-08 19:30"，解析失敗回傳 None
+    """
+    try:
+        parts = path.parts
+        # 從後往前取: show_HHmm.txt / DD / Mon / YYYY
+        filename = path.stem          # show_1930
+        day      = parts[-2]          # 08
+        month    = parts[-3]          # Apr
+        year     = parts[-4]          # 2026
+        hhmm     = filename.replace('show_', '')  # 1930
+        time_str = f"{hhmm[:2]}:{hhmm[2:]}"       # 19:30
+        return f"{year}-{month}-{day} {time_str}"
+    except Exception:
+        return None
+
+
 def collect_latest_configs(rconfig_dir: Path, tmp_dir: Path, logger,
-                           allowed_devices: set[str] | None = None) -> int:
+                           allowed_devices: set[str] | None = None) -> tuple[int, dict[str, str]]:
     """
     從 rconfig FortigateFirewalls 目錄結構中，取每台設備最新的 show_*.txt，
-    複製到 tmp_dir（平層），回傳複製成功的台數。
+    複製到 tmp_dir（平層），回傳 (複製成功台數, {device_name: last_backup_time})。
 
     allowed_devices: 若指定，只掃清單內的目錄名稱（None 表示全掃）
     """
     if not rconfig_dir.is_dir():
         logger.error(f"❌ rconfig 目錄不存在: {rconfig_dir}")
-        return 0
+        return 0, {}
 
     count = 0
     skipped = 0
+    device_times: dict[str, str] = {}
+
     for device_dir in sorted(rconfig_dir.iterdir()):
         if not device_dir.is_dir():
             continue
@@ -123,13 +145,18 @@ def collect_latest_configs(rconfig_dir: Path, tmp_dir: Path, logger,
         latest = candidates[-1]
         dest = tmp_dir / f"{device_dir.name}.txt"
         shutil.copy2(latest, dest)
-        logger.debug(f"📋 {device_dir.name}: 使用 {latest.relative_to(rconfig_dir)}")
+
+        backup_time = parse_backup_time(latest)
+        if backup_time:
+            device_times[device_dir.name] = backup_time
+
+        logger.debug(f"📋 {device_dir.name}: 使用 {latest.relative_to(rconfig_dir)} ({backup_time})")
         count += 1
 
     if skipped:
         logger.info(f"⏭️  略過 {skipped} 個舊目錄（不在 DB 有效設備清單中）")
 
-    return count
+    return count, device_times
 
 
 def main():
@@ -200,7 +227,7 @@ def main():
 
         tmp_dir = Path(tempfile.mkdtemp(prefix='fg_audit_'))
         logger.info(f"📂 rconfig 模式：從 {rconfig_dir} 收集最新備份")
-        count = collect_latest_configs(rconfig_dir, tmp_dir, logger, allowed_devices)
+        count, device_times = collect_latest_configs(rconfig_dir, tmp_dir, logger, allowed_devices)
         if count == 0:
             logger.error("❌ 沒有收集到任何備份檔案")
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -216,7 +243,7 @@ def main():
     # ---- 執行清冊 ----
     try:
         auditor = AdminAuditor(Path(args.config))
-        report = auditor.audit_directory(scan_dir)
+        report = auditor.audit_directory(scan_dir, device_times if args.rconfig_dir else {})
     finally:
         if tmp_dir:
             shutil.rmtree(tmp_dir, ignore_errors=True)

@@ -159,9 +159,11 @@ class AdminAuditor:
             'remote_guest': counts['remote_guest'],
             'unknown':      counts['unknown'],
             'total':        total,
+            'last_backup':  None,   # 由 audit_directory 填入
         }, accounts
 
-    def audit_directory(self, config_dir: Path) -> dict:
+    def audit_directory(self, config_dir: Path,
+                        device_times: dict | None = None) -> dict:
         """
         掃描目錄下所有 config 檔案，產生完整帳號清冊報告。
 
@@ -191,11 +193,17 @@ class AdminAuditor:
         totals['total_accounts'] = 0
         totals['total_firewalls'] = 0
 
+        device_times = device_times or {}
+
         for config_file in config_files:
             result = self.audit_single(config_file)
             if result is None:
                 continue
             fw_summary, accounts = result
+
+            # 填入資料更新時間（key 為 rconfig 目錄名，即 config_file stem）
+            device_key = config_file.stem
+            fw_summary['last_backup'] = device_times.get(device_key)
 
             firewalls.append(fw_summary)
             all_accounts.extend(accounts)
