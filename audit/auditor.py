@@ -149,16 +149,14 @@ class AdminAuditor:
             f"unknown={counts['unknown']})"
         )
 
-        # firewalls[] 拍平輸出：具名帳號各自一欄，供 Grafana 個別閾值設定
+        # firewalls[] 拍平輸出：每種角色一欄，供 Grafana 個別閾值設定
         return {
             'hostname':     hostname,
-            'config_file':  config_path.name,
             'fg':           named_counts.get('fg', 0),
             'twspadmin':    named_counts.get('twspadmin', 0),
             'Tacacs_admin': named_counts.get('Tacacs_admin', 0) + named_counts.get('Tacacs-admin', 0),
             'API_Read':     named_counts.get('API_Read', 0),
             'remote_guest': counts['remote_guest'],
-            'api_ro':       counts['api_ro'],
             'unknown':      counts['unknown'],
             'total':        total,
         }, accounts
