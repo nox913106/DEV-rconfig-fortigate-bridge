@@ -90,18 +90,26 @@ def extract_accounts(config_lines: list[str]) -> dict:
                 if name is None:
                     continue
 
-                # 從 edit 的 grandchildren 中提取 accprofile
+                # 從 edit 的 grandchildren 中提取欄位
                 accprofile = None
+                remote_auth = False
+                remote_group = None
                 for grandchild in child.children:
-                    accprofile = _extract_quoted_value(
-                        grandchild.text.strip(), 'accprofile'
-                    )
-                    if accprofile:
-                        break
+                    text = grandchild.text.strip()
+                    if text == 'set remote-auth enable':
+                        remote_auth = True
+                    val = _extract_quoted_value(text, 'accprofile')
+                    if val:
+                        accprofile = val
+                    val = _extract_quoted_value(text, 'remote-group')
+                    if val:
+                        remote_group = val
 
                 result[key].append({
                     'name': name,
                     'accprofile': accprofile,
+                    'remote_auth': remote_auth,
+                    'remote_group': remote_group,
                 })
 
     logger.debug(

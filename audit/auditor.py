@@ -66,6 +66,23 @@ class AdminAuditor:
                 'firewall_exceptions': {},
             }
 
+    def get_allowed_remote_groups(self, hostname: str) -> set:
+        """
+        取得該防火牆允許的 remote-group 清單。
+        只有明確列在 firewall_exceptions 中的防火牆才允許 remote-auth 帳號。
+
+        Args:
+            hostname: 防火牆 hostname
+
+        Returns:
+            允許的 remote-group 名稱 set（空 set 表示不允許任何 remote-auth 帳號）
+        """
+        exceptions = self.config.get('firewall_exceptions', {})
+        if exceptions and hostname in exceptions:
+            groups = exceptions[hostname].get('allowed_remote_groups', [])
+            return set(groups)
+        return set()
+
     def get_whitelist(self, hostname: str, account_type: str) -> set:
         """
         取得合併後的名稱白名單（global + exceptions）。
@@ -93,14 +110,17 @@ class AdminAuditor:
         return set(profiles) if profiles else set()
 
     def _is_compliant(self, name: str, accprofile: str | None,
-                      whitelist: set, compliant_profiles: set) -> tuple[bool, str]:
+                      remote_auth: bool, remote_group: str | None,
+                      whitelist: set, compliant_profiles: set,
+                      allowed_remote_groups: set) -> tuple[bool, str]:
         """
         判斷帳號是否合規。
 
         判定優先順序：
         1. 帳號名稱在白名單中 → 合規（依據：名稱白名單）
         2. accprofile 在合規 profile 清單中 → 合規（依據：profile 白名單）
-        3. 以上皆非 → 不合規
+        3. remote-auth 帳號且 remote-group 在該防火牆允許清單中 → 合規（依據：remote-group）
+        4. 以上皆非 → 不合規
 
         Returns:
             (is_compliant, reason)
@@ -109,6 +129,8 @@ class AdminAuditor:
             return True, 'whitelisted_name'
         if accprofile and compliant_profiles and accprofile in compliant_profiles:
             return True, 'compliant_profile'
+        if remote_auth and remote_group and remote_group in allowed_remote_groups:
+            return True, 'allowed_remote_group'
         return False, 'non_compliant'
 
     def audit_single(self, config_path: Path) -> dict | None:
@@ -127,6 +149,7 @@ class AdminAuditor:
 
         hostname = parsed['hostname']
         compliant_profiles = self.get_compliant_profiles()
+        allowed_remote_groups = self.get_allowed_remote_groups(hostname)
         accounts = {}
         total = 0
         compliant_count = 0
@@ -139,14 +162,19 @@ class AdminAuditor:
             for account in parsed[account_type]:
                 name = account['name']
                 accprofile = account['accprofile']
+                remote_auth = account.get('remote_auth', False)
+                remote_group = account.get('remote_group')
 
                 is_compliant, reason = self._is_compliant(
-                    name, accprofile, whitelist, compliant_profiles
+                    name, accprofile, remote_auth, remote_group,
+                    whitelist, compliant_profiles, allowed_remote_groups
                 )
 
                 account_list.append({
                     'name': name,
                     'accprofile': accprofile,
+                    'remote_auth': remote_auth,
+                    'remote_group': remote_group,
                     'compliant': is_compliant,
                     'reason': reason,
                 })
@@ -157,7 +185,7 @@ class AdminAuditor:
                     non_compliant_count += 1
                     logger.warning(
                         f"⚠️ 不合規帳號: [{hostname}] {account_type}/{name} "
-                        f"(accprofile={accprofile})"
+                        f"(accprofile={accprofile}, remote_group={remote_group})"
                     )
 
             accounts[account_type] = account_list

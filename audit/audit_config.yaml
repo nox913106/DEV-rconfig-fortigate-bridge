@@ -1,0 +1,74 @@
+# ==========================================
+# FortiGate 帳號稽核白名單設定
+# ==========================================
+#
+# 稽核邏輯（優先順序）：
+#   1. 帳號名稱在 global_whitelist 或 firewall_exceptions 中 → 合規
+#   2. 以上皆非 → 不合規（會輸出告警）
+#
+# 說明：
+#   - compliant_profiles 保留為空，強制以帳號名稱為唯一合規依據
+#     （避免任何未授權帳號因 profile 相同而被誤判為合規）
+#   - firewall_exceptions 用於有特殊功能的防火牆（如 guest Wi-Fi 管理）
+
+# ---- 全域白名單（所有防火牆皆適用） ----
+global_whitelist:
+
+  # FortiGate 本機管理員（config system admin）
+  system_admin:
+    - fg              # 本機 R/W 管理員（super_admin profile）
+    - twspadmin       # 本機 RO 管理員（reviewer profile）
+    - Tacacs_admin    # TACACS+ 遠端 R/W 管理員（super_admin profile）
+
+  # REST API 使用者（config system api-user）
+  api_user:
+    - API_Read        # REST API RO（reviewer profile）
+
+# ---- 合規 Profile 清單（刻意留空，請勿填寫） ----
+# 說明：本專案採用嚴格名稱白名單，不使用 profile 作為合規依據。
+#        若啟用此項，任何擁有對應 profile 的未知帳號都會被誤判為合規。
+compliant_profiles: []
+
+# ---- 防火牆個別例外 ----
+#
+# allowed_remote_groups：
+#   允許該防火牆上以 remote-auth enable + remote-group 設定的帳號通過稽核。
+#   這類帳號為個人 LDAP 帳號（非共用），名稱隨人員異動，無法用名稱白名單管控。
+#   未列在此處的防火牆（TWCH-HQ2-101F、TWCH-HQ2-60E-IOT）不允許任何 remote-auth 帳號。
+#
+firewall_exceptions:
+  TWCH-HQ2-201F-01:
+    allowed_remote_groups:
+      - "Guest Admin"   # Guest Wi-Fi 管理員（個人 LDAP 帳號）
+
+  TWCH-PCN-301E:
+    allowed_remote_groups:
+      - "Guest Admin"
+
+  TWTC-PA-101F:
+    allowed_remote_groups:
+      - "Guest Admin"
+
+  TW-TC-FortiGate-121G:
+    allowed_remote_groups:
+      - "Guest Admin"
+
+  TW-TC-UAIC-FW:
+    allowed_remote_groups:
+      - "Guest Admin"
+
+  TW-TP-BaoYu-FortiGate60E:
+    allowed_remote_groups:
+      - "Guest Admin"
+
+  TW-TP-XinYi-FortiGate60E:
+    allowed_remote_groups:
+      - "Guest Admin"
+
+  IN-Kavin-60E:
+    allowed_remote_groups:
+      - "Guest Admin"
+
+  IN-VSP-60E:
+    allowed_remote_groups:
+      - "Guest Admin"
