@@ -96,9 +96,10 @@ def parse_backup_time(path: Path) -> str | None:
     """
     從備份路徑解析資料更新時間。
     路徑格式: .../FortigateFirewalls/{device}/{YYYY}/{Mon}/{DD}/show_{HHmm}.txt
-    回傳格式: "2026-Apr-08 19:30"，解析失敗回傳 None
+    回傳格式: "2026-04-08 19:30 (UTC+8)"，解析失敗回傳 None
     """
     try:
+        from datetime import datetime, timezone, timedelta
         parts = path.parts
         # 從後往前取: show_HHmm.txt / DD / Mon / YYYY
         filename = path.stem          # show_1930
@@ -106,8 +107,12 @@ def parse_backup_time(path: Path) -> str | None:
         month    = parts[-3]          # Apr
         year     = parts[-4]          # 2026
         hhmm     = filename.replace('show_', '')  # 1930
-        time_str = f"{hhmm[:2]}:{hhmm[2:]}"       # 19:30
-        return f"{year}-{month}-{day} {time_str}"
+        # 解析為 datetime（rconfig 以台灣本地時間命名備份檔）
+        dt = datetime.strptime(
+            f"{year} {month} {day} {hhmm[:2]}:{hhmm[2:]}",
+            "%Y %b %d %H:%M"
+        ).replace(tzinfo=timezone(timedelta(hours=8)))
+        return dt.strftime("%Y-%m-%d %H:%M (UTC+8)")
     except Exception:
         return None
 
