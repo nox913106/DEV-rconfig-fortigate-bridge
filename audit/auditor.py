@@ -119,7 +119,8 @@ class AdminAuditor:
         判定優先順序：
         1. 帳號名稱在白名單中 → 合規（依據：名稱白名單）
         2. accprofile 在合規 profile 清單中 → 合規（依據：profile 白名單）
-        3. remote-auth 帳號且 remote-group 在該防火牆允許清單中 → 合規（依據：remote-group）
+        3. remote-group 在該防火牆允許清單中 → 合規（依據：remote-group）
+           注意：不要求 remote_auth=True，因為 ciscoconfparse2 不保證能解析此 flag
         4. 以上皆非 → 不合規
 
         Returns:
@@ -129,7 +130,7 @@ class AdminAuditor:
             return True, 'whitelisted_name'
         if accprofile and compliant_profiles and accprofile in compliant_profiles:
             return True, 'compliant_profile'
-        if remote_auth and remote_group and remote_group in allowed_remote_groups:
+        if remote_group and remote_group in allowed_remote_groups:
             return True, 'allowed_remote_group'
         return False, 'non_compliant'
 
