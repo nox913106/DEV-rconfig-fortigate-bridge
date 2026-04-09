@@ -142,7 +142,19 @@ def collect_latest_configs(rconfig_dir: Path, tmp_dir: Path, logger,
             skipped += 1
             continue
 
-        candidates = sorted(device_dir.rglob('show_*.txt'))
+        def _path_to_dt(p: Path):
+            """路徑排序 key：解析 {YYYY}/{Mon}/{DD}/show_{HHmm}.txt → datetime（失敗用 mtime）"""
+            try:
+                from datetime import datetime as _dt
+                parts = p.parts
+                return _dt.strptime(
+                    f"{parts[-4]} {parts[-3]} {parts[-2]} {p.stem.replace('show_', '')}",
+                    "%Y %b %d %H%M"
+                )
+            except Exception:
+                return p.stat().st_mtime
+
+        candidates = sorted(device_dir.rglob('show_*.txt'), key=_path_to_dt)
         if not candidates:
             logger.warning(f"⚠️ {device_dir.name}: 沒有找到備份檔案，略過")
             continue
