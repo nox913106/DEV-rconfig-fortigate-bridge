@@ -7,16 +7,17 @@
 #   # 掃描平層目錄（手動備份）
 #   python -m audit.main --config-dir /tmp/audit_input/
 #
-#   # 直接掃描 rconfig 目錄，自動取每台設備最新備份
+#   # 直接掃描 rconfig 目錄，自動取每台設備最新備份（掃全部）
 #   python -m audit.main --rconfig-dir /var/www/html/rconfig/storage/app/rconfig/data/FortigateFirewalls/
 #
-#   # 輸出 JSON 報告
-#   python -m audit.main --rconfig-dir /var/.../FortigateFirewalls/ --output /tmp/report.json
+#   # 從 rconfig DB 過濾有效設備（推薦，自動排除舊目錄）
+#   python -m audit.main --rconfig-dir /var/.../FortigateFirewalls/ --db-filter --output /tmp/report.json
 #
 
 import argparse
 import json
 import logging
+import os
 import sys
 import tempfile
 import shutil
@@ -27,6 +28,9 @@ from .auditor import AdminAuditor
 # 分類設定檔預設與 main.py 同目錄（audit/audit_config.yaml）
 _DEFAULT_CONFIG = Path(__file__).parent / 'audit_config.yaml'
 
+# rconfig DB 中 FortigateFirewalls category ID
+FORTIGATE_CATEGORY_ID = 8
+
 
 def setup_logging(log_level: str) -> None:
     logging.basicConfig(
@@ -36,24 +40,77 @@ def setup_logging(log_level: str) -> None:
     )
 
 
-def collect_latest_configs(rconfig_dir: Path, tmp_dir: Path, logger) -> int:
+def get_active_devices_from_db(logger) -> set[str] | None:
+    """
+    從 rconfig DB 查詢 FortigateFirewalls category 下的有效設備名稱。
+    連線資訊從環境變數（.env）讀取。
+
+    Returns:
+        有效 device_name 的 set，或 None（連線失敗時）
+    """
+    try:
+        import pymysql
+    except ImportError:
+        logger.error("❌ 缺少 pymysql，請執行: pip3 install pymysql")
+        return None
+
+    host = os.getenv('RCONFIG_DB_HOST', '127.0.0.1')
+    port = int(os.getenv('RCONFIG_DB_PORT', '3306'))
+    user = os.getenv('RCONFIG_DB_USER', 'pcc_rconfig')
+    password = os.getenv('RCONFIG_DB_PASSWORD', '')
+    database = os.getenv('RCONFIG_DB_NAME', 'rconfig')
+
+    try:
+        conn = pymysql.connect(
+            host=host, port=port, user=user,
+            password=password, database=database,
+            connect_timeout=5,
+        )
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT d.device_name
+                FROM devices d
+                JOIN category_device cd ON cd.device_id = d.id
+                WHERE cd.category_id = %s
+                """,
+                (FORTIGATE_CATEGORY_ID,)
+            )
+            rows = cur.fetchall()
+        conn.close()
+
+        devices = {row[0] for row in rows}
+        logger.info(f"✅ 從 DB 取得 {len(devices)} 台有效 FortiGate 設備")
+        return devices
+
+    except Exception as e:
+        logger.error(f"❌ DB 查詢失敗: {e}")
+        return None
+
+
+def collect_latest_configs(rconfig_dir: Path, tmp_dir: Path, logger,
+                           allowed_devices: set[str] | None = None) -> int:
     """
     從 rconfig FortigateFirewalls 目錄結構中，取每台設備最新的 show_*.txt，
     複製到 tmp_dir（平層），回傳複製成功的台數。
 
-    目錄結構：
-        {rconfig_dir}/{device_name}/{YYYY}/{Mon}/{DD}/show_{HHmm}.txt
+    allowed_devices: 若指定，只掃清單內的目錄名稱（None 表示全掃）
     """
     if not rconfig_dir.is_dir():
         logger.error(f"❌ rconfig 目錄不存在: {rconfig_dir}")
         return 0
 
     count = 0
+    skipped = 0
     for device_dir in sorted(rconfig_dir.iterdir()):
         if not device_dir.is_dir():
             continue
 
-        # 找出所有 show_*.txt，依路徑排序取最新（路徑包含年月日，字串排序即時間排序）
+        if allowed_devices is not None and device_dir.name not in allowed_devices:
+            logger.debug(f"⏭️  略過舊目錄: {device_dir.name}")
+            skipped += 1
+            continue
+
         candidates = sorted(device_dir.rglob('show_*.txt'))
         if not candidates:
             logger.warning(f"⚠️ {device_dir.name}: 沒有找到備份檔案，略過")
@@ -65,6 +122,9 @@ def collect_latest_configs(rconfig_dir: Path, tmp_dir: Path, logger) -> int:
         logger.debug(f"📋 {device_dir.name}: 使用 {latest.relative_to(rconfig_dir)}")
         count += 1
 
+    if skipped:
+        logger.info(f"⏭️  略過 {skipped} 個舊目錄（不在 DB 有效設備清單中）")
+
     return count
 
 
@@ -73,7 +133,6 @@ def main():
         description='FortiGate 帳號清冊工具 - 分類帳號角色，輸出 Grafana 相容 JSON 報告',
     )
 
-    # 輸入來源（二擇一）
     source_group = parser.add_mutually_exclusive_group(required=True)
     source_group.add_argument(
         '--config-dir',
@@ -84,6 +143,12 @@ def main():
         help='rconfig FortigateFirewalls 目錄，自動取每台設備最新備份',
     )
 
+    parser.add_argument(
+        '--db-filter',
+        action='store_true',
+        default=False,
+        help='從 rconfig DB 查詢有效設備清單，自動排除已停用/更名的舊目錄（推薦）',
+    )
     parser.add_argument(
         '--config',
         default=str(_DEFAULT_CONFIG),
@@ -111,9 +176,27 @@ def main():
     tmp_dir = None
     if args.rconfig_dir:
         rconfig_dir = Path(args.rconfig_dir)
+
+        # 載入 .env（讓 DB 連線資訊可用）
+        env_path = Path(__file__).parent.parent / '.env'
+        if env_path.is_file():
+            for line in env_path.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    k, _, v = line.partition('=')
+                    os.environ.setdefault(k.strip(), v.strip())
+
+        # DB 過濾
+        allowed_devices = None
+        if args.db_filter:
+            allowed_devices = get_active_devices_from_db(logger)
+            if allowed_devices is None:
+                logger.error("❌ 無法從 DB 取得設備清單，中止執行")
+                sys.exit(1)
+
         tmp_dir = Path(tempfile.mkdtemp(prefix='fg_audit_'))
         logger.info(f"📂 rconfig 模式：從 {rconfig_dir} 收集最新備份")
-        count = collect_latest_configs(rconfig_dir, tmp_dir, logger)
+        count = collect_latest_configs(rconfig_dir, tmp_dir, logger, allowed_devices)
         if count == 0:
             logger.error("❌ 沒有收集到任何備份檔案")
             shutil.rmtree(tmp_dir, ignore_errors=True)
