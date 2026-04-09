@@ -144,11 +144,17 @@ class AdminAuditor:
             f"unknown={counts['unknown']})"
         )
 
+        # firewalls[] 拍平輸出，方便 Grafana Infinity 直接讀取欄位
         return {
-            'hostname':    hostname,
-            'config_file': config_path.name,
-            'counts':      counts,
-            'total':       total,
+            'hostname':     hostname,
+            'config_file':  config_path.name,
+            'local_rw':     counts['local_rw'],
+            'local_ro':     counts['local_ro'],
+            'remote_rw':    counts['remote_rw'],
+            'remote_guest': counts['remote_guest'],
+            'api_ro':       counts['api_ro'],
+            'unknown':      counts['unknown'],
+            'total':        total,
         }, accounts
 
     def audit_directory(self, config_dir: Path) -> dict:
@@ -191,7 +197,7 @@ class AdminAuditor:
             all_accounts.extend(accounts)
 
             for cat in CATEGORIES:
-                totals[cat] += fw_summary['counts'][cat]
+                totals[cat] += fw_summary[cat]
             totals['total_accounts'] += fw_summary['total']
             totals['total_firewalls'] += 1
 
