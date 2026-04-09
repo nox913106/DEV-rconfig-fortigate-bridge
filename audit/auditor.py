@@ -108,18 +108,22 @@ class AdminAuditor:
 
         hostname = parsed['hostname']
         counts = {cat: 0 for cat in CATEGORIES}
+        # 各具名帳號出現次數（供 Grafana 個別欄位顯示）
+        named_counts: dict[str, int] = {}
         accounts = []
 
         for account_type in ('system_admin', 'api_user'):
             for account in parsed[account_type]:
+                name = account['name']
                 category = self.categorize(account, account_type)
                 counts[category] += 1
+                named_counts[name] = named_counts.get(name, 0) + 1
 
                 accounts.append({
                     'firewall':       hostname,
                     'config_file':    config_path.name,
                     'account_type':   account_type,
-                    'name':           account['name'],
+                    'name':           name,
                     'category':       category,
                     'category_label': CATEGORY_LABELS[category],
                     'accprofile':     account.get('accprofile'),
@@ -128,7 +132,7 @@ class AdminAuditor:
 
                 if category == 'unknown':
                     logger.warning(
-                        f"⚠️ 未知帳號: [{hostname}] {account['name']} "
+                        f"⚠️ 未知帳號: [{hostname}] {name} "
                         f"(accprofile={account.get('accprofile')}, "
                         f"remote_group={account.get('remote_group')})"
                     )
@@ -137,20 +141,22 @@ class AdminAuditor:
         status = "❌" if counts['unknown'] > 0 else "✅"
         logger.info(
             f"{status} {hostname}: {total} 帳號 "
-            f"(local={counts['local_rw']+counts['local_ro']}, "
-            f"remote_rw={counts['remote_rw']}, "
+            f"(fg={named_counts.get('fg', 0)}, "
+            f"twspadmin={named_counts.get('twspadmin', 0)}, "
+            f"tacacs={named_counts.get('Tacacs_admin', 0) + named_counts.get('Tacacs-admin', 0)}, "
+            f"api={named_counts.get('API_Read', 0)}, "
             f"guest={counts['remote_guest']}, "
-            f"api={counts['api_ro']}, "
             f"unknown={counts['unknown']})"
         )
 
-        # firewalls[] 拍平輸出，方便 Grafana Infinity 直接讀取欄位
+        # firewalls[] 拍平輸出：具名帳號各自一欄，供 Grafana 個別閾值設定
         return {
             'hostname':     hostname,
             'config_file':  config_path.name,
-            'local_rw':     counts['local_rw'],
-            'local_ro':     counts['local_ro'],
-            'remote_rw':    counts['remote_rw'],
+            'fg':           named_counts.get('fg', 0),
+            'twspadmin':    named_counts.get('twspadmin', 0),
+            'Tacacs_admin': named_counts.get('Tacacs_admin', 0) + named_counts.get('Tacacs-admin', 0),
+            'API_Read':     named_counts.get('API_Read', 0),
             'remote_guest': counts['remote_guest'],
             'api_ro':       counts['api_ro'],
             'unknown':      counts['unknown'],
@@ -196,8 +202,8 @@ class AdminAuditor:
             firewalls.append(fw_summary)
             all_accounts.extend(accounts)
 
-            for cat in CATEGORIES:
-                totals[cat] += fw_summary[cat]
+            for key in ('fg', 'twspadmin', 'Tacacs_admin', 'API_Read', 'remote_guest', 'unknown'):
+                totals[key] = totals.get(key, 0) + fw_summary[key]
             totals['total_accounts'] += fw_summary['total']
             totals['total_firewalls'] += 1
 
