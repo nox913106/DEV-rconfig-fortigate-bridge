@@ -55,6 +55,10 @@ def get_active_devices_from_db(logger) -> set[str] | None:
         return None
 
     host = os.getenv('RCONFIG_DB_HOST', '127.0.0.1')
+    # audit 工具在宿主機直接執行，不走 Docker 橋接網路
+    # 若 .env 填的是 Docker 閘道 IP（192.168.254.1），自動改用 127.0.0.1
+    if host == '192.168.254.1':
+        host = '127.0.0.1'
     port = int(os.getenv('RCONFIG_DB_PORT', '3306'))
     user = os.getenv('RCONFIG_DB_USER', 'pcc_rconfig')
     password = os.getenv('RCONFIG_DB_PASSWORD', '')
