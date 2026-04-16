@@ -30,3 +30,13 @@ account_categories:
       - "Captive Portal-LDAP"   # 部分站點使用
       - "Captive Portal-ID"     # 印度 Kavin
       - "Captive Portal-AWS"    # 印度 VSP
+
+# ==========================================
+# TACACS+ 成員查詢（LDAP）
+# ==========================================
+# 密碼從環境變數 TACACS_LDAP_BIND_PW 讀取（請設定於 .env）
+tacacs_ldap:
+  host: "ldaps://ldap.pouchen.com:636"
+  bind_dn: "uid=tacas_adm,ou=HWAdmin,ou=manager,o=pcc"
+  bind_pw_env: "TACACS_LDAP_BIND_PW"
+  group_dn: "cn=grp-tacacsmgr,ou=groups,o=pcc"

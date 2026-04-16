@@ -23,6 +23,8 @@ import tempfile
 import shutil
 from pathlib import Path
 
+import yaml
+
 from .auditor import AdminAuditor
 
 # 分類設定檔預設與 main.py 同目錄（audit/audit_config.yaml）
@@ -176,6 +178,46 @@ def collect_latest_configs(rconfig_dir: Path, tmp_dir: Path, logger,
     return count, device_times
 
 
+def query_tacacs_members(tacacs_cfg: dict, logger) -> list[str]:
+    """
+    從 LDAP 查詢 TACACS+ 群組成員清單。
+    密碼從 tacacs_cfg['bind_pw_env'] 指定的環境變數讀取。
+    查詢失敗時回傳空 list（不中斷主流程）。
+    """
+    try:
+        from ldap3 import Server, Connection, ALL
+    except ImportError:
+        logger.warning("⚠️ 缺少 ldap3，跳過 TACACS 成員查詢。請執行: pip3 install ldap3")
+        return []
+
+    bind_pw = os.getenv(tacacs_cfg.get('bind_pw_env', ''), '')
+    if not bind_pw:
+        logger.warning("⚠️ 找不到 TACACS LDAP 密碼（環境變數未設定），跳過成員查詢")
+        return []
+
+    try:
+        server = Server(tacacs_cfg['host'], get_info=ALL)
+        conn = Connection(
+            server,
+            user=tacacs_cfg['bind_dn'],
+            password=bind_pw,
+            auto_bind=True,
+        )
+        conn.search(tacacs_cfg['group_dn'], '(objectClass=*)', attributes=['member'])
+        if not conn.entries:
+            return []
+        members = []
+        for dn in conn.entries[0]['member'].values:
+            # uid=MAX.FUNG,ou=K0,c=tw,o=pcc → MAX.FUNG
+            uid = dn.split(',')[0].replace('uid=', '')
+            members.append(uid)
+        conn.unbind()
+        return sorted(members)
+    except Exception as e:
+        logger.warning(f"⚠️ TACACS 成員查詢失敗: {e}")
+        return []
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='FortiGate 帳號清冊工具 - 分類帳號角色，輸出 Grafana 相容 JSON 報告',
@@ -264,6 +306,16 @@ def main():
     finally:
         if tmp_dir:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    # ---- 查詢 TACACS 成員 ----
+    audit_cfg_raw = yaml.safe_load(Path(args.config).read_text(encoding='utf-8'))
+    tacacs_cfg = audit_cfg_raw.get('tacacs_ldap')
+    if tacacs_cfg:
+        tacacs_members = query_tacacs_members(tacacs_cfg, logger)
+        report['tacacs_members'] = tacacs_members
+        logger.info(f"✅ TACACS 成員: {len(tacacs_members)} 人 {tacacs_members}")
+    else:
+        report['tacacs_members'] = []
 
     # ---- 輸出報告 ----
     report_json = json.dumps(report, ensure_ascii=False, indent=2)
