@@ -308,11 +308,15 @@ def main():
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # ---- 查詢 TACACS 成員 ----
+    from datetime import datetime, timezone, timedelta as _td
     audit_cfg_raw = yaml.safe_load(Path(args.config).read_text(encoding='utf-8'))
     tacacs_cfg = audit_cfg_raw.get('tacacs_ldap')
     if tacacs_cfg:
         tacacs_members = query_tacacs_members(tacacs_cfg, logger)
-        report['tacacs_members'] = tacacs_members
+        queried_at = datetime.now(timezone(_td(hours=8))).isoformat(timespec='milliseconds')
+        report['tacacs_members'] = [
+            {'uid': m, 'queried_at': queried_at} for m in tacacs_members
+        ]
         logger.info(f"✅ TACACS 成員: {len(tacacs_members)} 人 {tacacs_members}")
     else:
         report['tacacs_members'] = []
