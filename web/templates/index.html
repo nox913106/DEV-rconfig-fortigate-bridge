@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fortigate 備份瀏覽器</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242736;
+    --border: #2e3347;
+    --accent: #4f8ef7;
+    --accent-dim: #1e3a6e;
+    --green: #3dd68c;
+    --green-dim: #1a4a34;
+    --text: #e2e8f0;
+    --text-dim: #8892a4;
+    --red: #f56565;
+    --radius: 10px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  header svg { color: var(--accent); flex-shrink: 0; }
+  header h1 { font-size: 17px; font-weight: 600; letter-spacing: .3px; }
+  header span { color: var(--text-dim); font-size: 13px; }
+
+  /* ── Layout ── */
+  .page { max-width: 1100px; margin: 32px auto; padding: 0 20px; }
+
+  /* ── Device Grid ── */
+  #device-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+  }
+
+  .device-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    cursor: pointer;
+    transition: border-color .15s, transform .1s;
+  }
+  .device-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .device-card .icon {
+    width: 40px; height: 40px;
+    border-radius: 8px;
+    background: var(--accent-dim);
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 14px;
+    color: var(--accent);
+  }
+  .device-card h3 {
+    font-size: 13px;
+    font-weight: 600;
+    word-break: break-all;
+    margin-bottom: 8px;
+  }
+  .device-card .meta {
+    color: var(--text-dim);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .device-card .latest-date { color: var(--green); font-size: 12px; }
+  .device-card .no-backup { color: var(--text-dim); font-style: italic; }
+
+  /* ── Loading / Empty ── */
+  .spinner {
+    display: flex; justify-content: center; align-items: center;
+    padding: 60px; color: var(--text-dim); gap: 10px;
+  }
+  .dot-pulse::after {
+    content: '...';
+    animation: dots 1.2s steps(4, end) infinite;
+  }
+  @keyframes dots {
+    0%, 20% { content: ''; }
+    40% { content: '.'; }
+    60% { content: '..'; }
+    80%, 100% { content: '...'; }
+  }
+
+  /* ── Calendar View ── */
+  #calendar-view { display: none; }
+
+  .back-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 6px;
+    padding: 7px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: border-color .15s, color .15s;
+    margin-bottom: 24px;
+  }
+  .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .cal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .cal-header h2 { font-size: 18px; font-weight: 600; }
+  .cal-header .device-sub { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
+
+  .month-nav {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .month-nav button {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 34px; height: 34px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color .15s;
+  }
+  .month-nav button:hover { border-color: var(--accent); color: var(--accent); }
+  #month-label {
+    min-width: 120px;
+    text-align: center;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  /* ── Calendar Grid ── */
+  .calendar-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+  .cal-day-names {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+  .cal-day-names span {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    padding: 4px 0;
+    text-transform: uppercase;
+  }
+
+  #cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+  }
+
+  .cal-cell {
+    aspect-ratio: 1;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    position: relative;
+    transition: background .12s;
+  }
+  .cal-cell.empty { background: transparent; }
+  .cal-cell.no-backup {
+    color: var(--text-dim);
+    cursor: default;
+  }
+  .cal-cell.has-backup {
+    background: var(--green-dim);
+    color: var(--green);
+    cursor: pointer;
+    font-weight: 600;
+    border: 1px solid transparent;
+    transition: border-color .12s, background .12s;
+  }
+  .cal-cell.has-backup:hover {
+    border-color: var(--green);
+    background: #1f5a3e;
+  }
+  .cal-cell.selected {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+  }
+  .cal-cell .badge {
+    font-size: 9px;
+    margin-top: 2px;
+    opacity: .75;
+  }
+  .cal-cell.today-marker::after {
+    content: '';
+    position: absolute;
+    bottom: 4px;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* ── File List ── */
+  #file-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: none;
+  }
+  .file-panel-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .file-panel-header h3 { font-size: 14px; font-weight: 600; }
+  .file-panel-header .file-count {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .file-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    gap: 14px;
+    transition: background .1s;
+  }
+  .file-item:last-child { border-bottom: none; }
+  .file-item:hover { background: var(--surface2); }
+  .file-item .file-icon { color: var(--text-dim); flex-shrink: 0; }
+  .file-item .file-name {
+    flex: 1;
+    font-size: 13px;
+    word-break: break-all;
+  }
+  .file-item .file-name .ext-conf { color: var(--accent); }
+  .file-item .file-name .ext-txt { color: var(--green); }
+  .file-item .file-size {
+    color: var(--text-dim);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .dl-btn {
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 5px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-decoration: none;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: background .12s;
+  }
+  .dl-btn:hover { background: #1e3a6e; }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <rect x="2" y="3" width="20" height="14" rx="2"/>
+    <path d="M8 21h8M12 17v4"/>
+    <path d="M7 8h10M7 11h6"/>
+  </svg>
+  <h1>Fortigate 備份瀏覽器</h1>
+  <span>FortigateFirewalls 設定檔歸檔</span>
+</header>
+
+<!-- Device List View -->
+<div class="page" id="device-view">
+  <div id="device-grid">
+    <div class="spinner"><span class="dot-pulse">載入設備清單</span></div>
+  </div>
+</div>
+
+<!-- Calendar View -->
+<div class="page" id="calendar-view">
+  <button class="back-btn" onclick="showDeviceList()">
+    ← 返回設備清單
+  </button>
+
+  <div class="cal-header">
+    <div>
+      <h2 id="cal-device-name"></h2>
+      <div class="device-sub" id="cal-device-sub"></div>
+    </div>
+    <div class="month-nav">
+      <button onclick="changeMonth(-1)">‹</button>
+      <span id="month-label"></span>
+      <button onclick="changeMonth(1)">›</button>
+    </div>
+  </div>
+
+  <div class="calendar-wrap">
+    <div class="cal-day-names">
+      <span>日</span><span>一</span><span>二</span>
+      <span>三</span><span>四</span><span>五</span><span>六</span>
+    </div>
+    <div id="cal-grid"></div>
+  </div>
+
+  <div id="file-panel">
+    <div class="file-panel-header">
+      <h3 id="file-panel-title"></h3>
+      <span class="file-count" id="file-count"></span>
+    </div>
+    <div id="file-list"></div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────
+let currentDevice = null;
+let currentYear   = new Date().getFullYear();
+let currentMonth  = new Date().getMonth() + 1; // 1-12
+let activeDays    = [];   // days with backups in current month
+let selectedDay   = null;
+
+const MON_ABBR = ['Jan','Feb','Mar','Apr','May','Jun',
+                  'Jul','Aug','Sep','Oct','Nov','Dec'];
+const MON_ZH   = ['1 月','2 月','3 月','4 月','5 月','6 月',
+                  '7 月','8 月','9 月','10 月','11 月','12 月'];
+
+// ── Views ──────────────────────────────────────────────
+function showDeviceList() {
+  document.getElementById('device-view').style.display = '';
+  document.getElementById('calendar-view').style.display = 'none';
+  currentDevice = null;
+}
+
+async function showCalendar(device) {
+  currentDevice = device;
+  selectedDay   = null;
+
+  document.getElementById('device-view').style.display = 'none';
+  document.getElementById('calendar-view').style.display = '';
+  document.getElementById('cal-device-name').textContent = device.name;
+  document.getElementById('cal-device-sub').textContent =
+    device.latest ? `最新備份：${device.latest}` : '尚無備份';
+  document.getElementById('file-panel').style.display = 'none';
+
+  // If device has a latest date, jump to that month
+  if (device.latest) {
+    const parts = device.latest.split('-');
+    currentYear  = parseInt(parts[0]);
+    currentMonth = parseInt(parts[1]);
+  } else {
+    currentYear  = new Date().getFullYear();
+    currentMonth = new Date().getMonth() + 1;
+  }
+
+  await loadCalendar();
+}
+
+// ── Data Loaders ───────────────────────────────────────
+async function loadDevices() {
+  try {
+    const res = await fetch('/api/devices');
+    const devices = await res.json();
+    renderDeviceGrid(devices);
+  } catch (e) {
+    document.getElementById('device-grid').innerHTML =
+      '<div class="spinner" style="color:var(--red)">無法載入設備清單</div>';
+  }
+}
+
+async function loadCalendar() {
+  document.getElementById('cal-grid').innerHTML =
+    '<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--text-dim)">載入中…</div>';
+  document.getElementById('file-panel').style.display = 'none';
+
+  document.getElementById('month-label').textContent =
+    `${currentYear} 年 ${MON_ZH[currentMonth - 1]}`;
+
+  try {
+    const res = await fetch(
+      `/api/devices/${encodeURIComponent(currentDevice.name)}/calendar/${currentYear}/${currentMonth}`
+    );
+    activeDays = await res.json();
+  } catch (e) {
+    activeDays = [];
+  }
+
+  renderCalendar();
+}
+
+async function loadDayFiles(day) {
+  selectedDay = day;
+  renderCalendar(); // re-render to highlight selected day
+
+  const mon = MON_ABBR[currentMonth - 1];
+  const dateStr = `${currentYear} 年 ${currentMonth} 月 ${day} 日`;
+  document.getElementById('file-panel-title').textContent = dateStr;
+  document.getElementById('file-panel').style.display = '';
+  document.getElementById('file-list').innerHTML =
+    '<div class="spinner" style="padding:20px">載入中…</div>';
+
+  try {
+    const res = await fetch(
+      `/api/devices/${encodeURIComponent(currentDevice.name)}/files/${currentYear}/${mon}/${day}`
+    );
+    const files = await res.json();
+    renderFileList(files, day, mon);
+  } catch (e) {
+    document.getElementById('file-list').innerHTML =
+      '<div class="spinner" style="color:var(--red)">載入失敗</div>';
+  }
+}
+
+// ── Renderers ─────────────────────────────────────────
+function renderDeviceGrid(devices) {
+  if (!devices.length) {
+    document.getElementById('device-grid').innerHTML =
+      '<div class="spinner">找不到任何 Fortigate 設備</div>';
+    return;
+  }
+
+  document.getElementById('device-grid').innerHTML = devices.map(d => `
+    <div class="device-card" onclick="showCalendar(${JSON.stringify(d).replace(/"/g, '&quot;')})">
+      <div class="icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <path d="M8 21h8M12 17v4"/>
+        </svg>
+      </div>
+      <h3>${escHtml(d.name)}</h3>
+      <div class="meta">
+        ${d.latest
+          ? `<span class="latest-date">最新備份 ${escHtml(d.latest)}</span>`
+          : `<span class="no-backup">尚無備份</span>`}
+        <span>${d.totalFiles} 個檔案</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderCalendar() {
+  const grid = document.getElementById('cal-grid');
+  const today = new Date();
+
+  // First weekday of this month (0=Sun)
+  const firstDay = new Date(currentYear, currentMonth - 1, 1).getDay();
+  // Total days in month
+  const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+
+  const activeSet = new Set(activeDays);
+  let html = '';
+
+  // Empty prefix cells
+  for (let i = 0; i < firstDay; i++) {
+    html += '<div class="cal-cell empty"></div>';
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const hasBackup = activeSet.has(d);
+    const isSelected = (d === selectedDay);
+    const isToday = (
+      today.getFullYear() === currentYear &&
+      today.getMonth() + 1 === currentMonth &&
+      today.getDate() === d
+    );
+
+    let cls = 'cal-cell';
+    if (hasBackup) cls += isSelected ? ' selected' : ' has-backup';
+    else           cls += ' no-backup';
+    if (isToday && !hasBackup) cls += ' today-marker';
+
+    const onclick = hasBackup ? `loadDayFiles(${d})` : '';
+    html += `
+      <div class="${cls}" ${onclick ? `onclick="${onclick}"` : ''}>
+        ${d}
+        ${hasBackup ? '<span class="badge">備份</span>' : ''}
+      </div>`;
+  }
+
+  grid.innerHTML = html;
+  document.getElementById('file-count').textContent = '';
+}
+
+function renderFileList(files, day, mon) {
+  document.getElementById('file-count').textContent = `${files.length} 個檔案`;
+
+  if (!files.length) {
+    document.getElementById('file-list').innerHTML =
+      '<div class="spinner" style="padding:16px;color:var(--text-dim)">此日期無檔案</div>';
+    return;
+  }
+
+  document.getElementById('file-list').innerHTML = files.map(f => {
+    const ext = f.name.split('.').pop().toLowerCase();
+    const nameHtml = f.name.replace(/\.(conf|txt)$/i,
+      `.<span class="ext-${ext === 'conf' ? 'conf' : 'txt'}">$1</span>`);
+    const size = fmtSize(f.size);
+    const mtime = new Date(f.mtime * 1000).toLocaleString('zh-TW');
+    const href =
+      `/download/${encodeURIComponent(currentDevice.name)}` +
+      `/${currentYear}/${mon}/${day}/${encodeURIComponent(f.name)}`;
+
+    return `
+      <div class="file-item">
+        <svg class="file-icon" width="18" height="18" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <div class="file-name">
+          ${nameHtml}
+          <div style="color:var(--text-dim);font-size:11px;margin-top:2px">${mtime}</div>
+        </div>
+        <span class="file-size">${size}</span>
+        <a class="dl-btn" href="${href}" download>
+          ↓ 下載
+        </a>
+      </div>`;
+  }).join('');
+}
+
+// ── Month Navigation ───────────────────────────────────
+function changeMonth(delta) {
+  currentMonth += delta;
+  if (currentMonth > 12) { currentMonth = 1;  currentYear++; }
+  if (currentMonth < 1)  { currentMonth = 12; currentYear--; }
+  selectedDay = null;
+  loadCalendar();
+}
+
+// ── Utils ──────────────────────────────────────────────
+function fmtSize(bytes) {
+  if (bytes < 1024)        return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;')
+            .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ───────────────────────────────────────────────
+loadDevices();
+</script>
+</body>
+</html>

@@ -66,6 +66,30 @@ services:
         max-size: "20m"
         max-file: "5"
 
+  # ==========================================
+  # Web 服務 - Fortigate 備份瀏覽器
+  # ==========================================
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: rconfig-bridge-web
+    environment:
+      RCONFIG_DATA_DIR: /rconfig/storage/app/rconfig/data
+      TZ: Asia/Taipei
+    volumes:
+      - ${RCONFIG_PATH:-/var/www/html/rconfig}/storage/app/rconfig/data:/rconfig/storage/app/rconfig/data:ro
+    ports:
+      - "8882:5000"
+    restart: unless-stopped
+    networks:
+      - bridge-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 # ==========================================
 # 網路設定
 # ==========================================
