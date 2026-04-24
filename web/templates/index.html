@@ -375,7 +375,7 @@ async function showCalendar(device) {
   selectedDay   = null;
 
   document.getElementById('device-view').style.display = 'none';
-  document.getElementById('calendar-view').style.display = '';
+  document.getElementById('calendar-view').style.display = 'block';
   document.getElementById('cal-device-name').textContent = device.name;
   document.getElementById('cal-device-sub').textContent =
     device.latest ? `最新備份：${device.latest}` : '尚無備份';
