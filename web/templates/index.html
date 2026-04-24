@@ -433,7 +433,7 @@ async function loadDayFiles(day) {
   const mon = MON_ABBR[currentMonth - 1];
   const dateStr = `${currentYear} 年 ${currentMonth} 月 ${day} 日`;
   document.getElementById('file-panel-title').textContent = dateStr;
-  document.getElementById('file-panel').style.display = '';
+  document.getElementById('file-panel').style.display = 'block';
   document.getElementById('file-list').innerHTML =
     '<div class="spinner" style="padding:20px">載入中…</div>';
 
