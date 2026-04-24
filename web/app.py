@@ -18,13 +18,9 @@ MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
           'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 
-def _safe_path(path: Path) -> bool:
-    """確認路徑在 FORTIGATE_DIR 範圍內，防止 path traversal"""
-    try:
-        path.resolve().relative_to(FORTIGATE_DIR.resolve())
-        return True
-    except ValueError:
-        return False
+def _valid_segment(s: str) -> bool:
+    """防止 path traversal：不允許 .., /, \\ 等字元"""
+    return bool(s) and '..' not in s and '/' not in s and '\\' not in s
 
 
 @app.route('/')
@@ -78,12 +74,11 @@ def list_devices():
 def get_calendar_days(hostname, year, month):
     if month < 1 or month > 12:
         abort(400)
+    if not _valid_segment(hostname):
+        abort(400)
 
     mon_abbr = MONTHS[month - 1]
     month_dir = FORTIGATE_DIR / hostname / str(year) / mon_abbr
-
-    if not _safe_path(month_dir):
-        abort(403)
 
     days = []
     if month_dir.exists():
@@ -104,11 +99,10 @@ def get_calendar_days(hostname, year, month):
 def list_files(hostname, year, mon_abbr, day):
     if mon_abbr not in MONTHS:
         abort(400)
+    if not _valid_segment(hostname):
+        abort(400)
 
     day_dir = FORTIGATE_DIR / hostname / str(year) / mon_abbr / f"{day:02d}"
-
-    if not _safe_path(day_dir):
-        abort(403)
 
     if not day_dir.exists():
         return jsonify([])
@@ -131,12 +125,11 @@ def list_files(hostname, year, mon_abbr, day):
 def download_file(hostname, year, mon_abbr, day, filename):
     if mon_abbr not in MONTHS:
         abort(400)
+    if not _valid_segment(hostname) or not _valid_segment(filename):
+        abort(400)
 
     file_path = (FORTIGATE_DIR / hostname / str(year)
                  / mon_abbr / f"{day:02d}" / filename)
-
-    if not _safe_path(file_path):
-        abort(403)
 
     if not file_path.exists() or not file_path.is_file():
         abort(404)

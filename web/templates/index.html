@@ -457,8 +457,9 @@ function renderDeviceGrid(devices) {
     return;
   }
 
-  document.getElementById('device-grid').innerHTML = devices.map(d => `
-    <div class="device-card" onclick="showCalendar(${JSON.stringify(d).replace(/"/g, '&quot;')})">
+  const grid = document.getElementById('device-grid');
+  grid.innerHTML = devices.map(d => `
+    <div class="device-card" data-device='${JSON.stringify(d).replace(/'/g, "&#39;")}'>
       <div class="icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
              stroke="currentColor" stroke-width="2">
@@ -475,6 +476,13 @@ function renderDeviceGrid(devices) {
       </div>
     </div>
   `).join('');
+
+  grid.querySelectorAll('.device-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const d = JSON.parse(card.dataset.device);
+      showCalendar(d);
+    });
+  });
 }
 
 function renderCalendar() {
