@@ -5,6 +5,7 @@ Fortigate 備份瀏覽器 - Flask 後端
 """
 
 import os
+from datetime import date, datetime
 from pathlib import Path
 from flask import Flask, jsonify, send_file, render_template, abort
 
@@ -61,10 +62,20 @@ def list_devices():
                                 f"-{day_dir.name.zfill(2)}"
                             )
 
+        days_ago = None
+        if latest_date:
+            try:
+                last_dt = datetime.strptime(latest_date, '%Y-%m-%d').date()
+                days_ago = (date.today() - last_dt).days
+            except ValueError:
+                pass
+
         devices.append({
             'name': device_dir.name,
             'latest': latest_date,
             'totalFiles': total_files,
+            'daysAgo': days_ago,
+            'archived': days_ago is None or days_ago > 30,
         })
 
     return jsonify(devices)

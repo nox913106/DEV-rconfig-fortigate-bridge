@@ -17,6 +17,8 @@
     --text: #e2e8f0;
     --text-dim: #8892a4;
     --red: #f56565;
+    --amber: #f6a623;
+    --amber-dim: #3d2000;
     --radius: 10px;
   }
 
@@ -46,6 +48,38 @@
 
   /* ── Layout ── */
   .page { max-width: 1100px; margin: 32px auto; padding: 0 20px; }
+
+  /* ── Tabs ── */
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    padding: 10px 20px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-bottom: -1px;
+    transition: color .15s, border-color .15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-btn.archived-tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+  .tab-count {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 1px 8px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
 
   /* ── Device Grid ── */
   #device-grid {
@@ -89,6 +123,25 @@
   }
   .device-card .latest-date { color: var(--green); font-size: 12px; }
   .device-card .no-backup { color: var(--text-dim); font-style: italic; }
+
+  /* ── Archived card variant ── */
+  .device-card.archived .icon {
+    background: var(--amber-dim);
+    color: var(--amber);
+  }
+  .device-card.archived:hover { border-color: var(--amber); transform: translateY(-2px); }
+  .stale-warn { color: var(--amber); font-size: 12px; }
+  .archived-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    background: var(--amber-dim);
+    color: var(--amber);
+    border-radius: 4px;
+    font-size: 10px;
+    padding: 2px 7px;
+    font-weight: 600;
+    margin-top: 6px;
+    width: fit-content;
+  }
 
   /* ── Loading / Empty ── */
   .spinner {
@@ -310,6 +363,16 @@
 
 <!-- Device List View -->
 <div class="page" id="device-view">
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tab-btn-active" onclick="switchTab('active')">
+      線上設備
+      <span class="tab-count" id="tab-count-active">—</span>
+    </button>
+    <button class="tab-btn archived-tab" id="tab-btn-archived" onclick="switchTab('archived')">
+      舊資料保留
+      <span class="tab-count" id="tab-count-archived">—</span>
+    </button>
+  </div>
   <div id="device-grid">
     <div class="spinner"><span class="dot-pulse">載入設備清單</span></div>
   </div>
@@ -352,10 +415,12 @@
 
 <script>
 // ── State ──────────────────────────────────────────────
+let allDevices    = [];
+let currentTab    = 'active';
 let currentDevice = null;
 let currentYear   = new Date().getFullYear();
 let currentMonth  = new Date().getMonth() + 1; // 1-12
-let activeDays    = [];   // days with backups in current month
+let activeDays    = [];
 let selectedDay   = null;
 
 const MON_ABBR = ['Jan','Feb','Mar','Apr','May','Jun',
@@ -381,7 +446,6 @@ async function showCalendar(device) {
     device.latest ? `最新備份：${device.latest}` : '尚無備份';
   document.getElementById('file-panel').style.display = 'none';
 
-  // If device has a latest date, jump to that month
   if (device.latest) {
     const parts = device.latest.split('-');
     currentYear  = parseInt(parts[0]);
@@ -394,12 +458,20 @@ async function showCalendar(device) {
   await loadCalendar();
 }
 
+// ── Tab Switching ──────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tab-btn-active').classList.toggle('active', tab === 'active');
+  document.getElementById('tab-btn-archived').classList.toggle('active', tab === 'archived');
+  renderDeviceGrid(allDevices);
+}
+
 // ── Data Loaders ───────────────────────────────────────
 async function loadDevices() {
   try {
     const res = await fetch('/api/devices');
-    const devices = await res.json();
-    renderDeviceGrid(devices);
+    allDevices = await res.json();
+    renderDeviceGrid(allDevices);
   } catch (e) {
     document.getElementById('device-grid').innerHTML =
       '<div class="spinner" style="color:var(--red)">無法載入設備清單</div>';
@@ -428,7 +500,7 @@ async function loadCalendar() {
 
 async function loadDayFiles(day) {
   selectedDay = day;
-  renderCalendar(); // re-render to highlight selected day
+  renderCalendar();
 
   const mon = MON_ABBR[currentMonth - 1];
   const dateStr = `${currentYear} 年 ${currentMonth} 月 ${day} 日`;
@@ -451,31 +523,63 @@ async function loadDayFiles(day) {
 
 // ── Renderers ─────────────────────────────────────────
 function renderDeviceGrid(devices) {
-  if (!devices.length) {
-    document.getElementById('device-grid').innerHTML =
-      '<div class="spinner">找不到任何 Fortigate 設備</div>';
+  const activeCount   = devices.filter(d => !d.archived).length;
+  const archivedCount = devices.filter(d =>  d.archived).length;
+  document.getElementById('tab-count-active').textContent   = activeCount;
+  document.getElementById('tab-count-archived').textContent = archivedCount;
+
+  const filtered = devices.filter(d => currentTab === 'archived' ? d.archived : !d.archived);
+  const grid = document.getElementById('device-grid');
+
+  if (!filtered.length) {
+    const msg = currentTab === 'archived'
+      ? '沒有超過 30 天未備份的設備'
+      : '找不到任何 Fortigate 設備';
+    grid.innerHTML = `<div class="spinner">${msg}</div>`;
     return;
   }
 
-  const grid = document.getElementById('device-grid');
-  grid.innerHTML = devices.map(d => `
-    <div class="device-card" data-device='${JSON.stringify(d).replace(/'/g, "&#39;")}'>
-      <div class="icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2">
-          <rect x="2" y="3" width="20" height="14" rx="2"/>
-          <path d="M8 21h8M12 17v4"/>
-        </svg>
-      </div>
-      <h3>${escHtml(d.name)}</h3>
-      <div class="meta">
-        ${d.latest
-          ? `<span class="latest-date">最新備份 ${escHtml(d.latest)}</span>`
-          : `<span class="no-backup">尚無備份</span>`}
-        <span>${d.totalFiles} 個檔案</span>
-      </div>
-    </div>
-  `).join('');
+  grid.innerHTML = filtered.map(d => {
+    if (d.archived) {
+      const daysText = d.daysAgo != null ? `${d.daysAgo} 天前` : '從未備份';
+      return `
+        <div class="device-card archived" data-device='${JSON.stringify(d).replace(/'/g, "&#39;")}'>
+          <div class="icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2">
+              <polyline points="21 8 21 21 3 21 3 8"/>
+              <rect x="1" y="3" width="22" height="5"/>
+              <line x1="10" y1="12" x2="14" y2="12"/>
+            </svg>
+          </div>
+          <h3>${escHtml(d.name)}</h3>
+          <div class="meta">
+            <span class="stale-warn">最後備份 ${daysText}</span>
+            ${d.latest ? `<span>日期：${escHtml(d.latest)}</span>` : ''}
+            <span>${d.totalFiles} 個檔案</span>
+            <span class="archived-badge">⚠ 超過 30 天未備份</span>
+          </div>
+        </div>`;
+    } else {
+      return `
+        <div class="device-card" data-device='${JSON.stringify(d).replace(/'/g, "&#39;")}'>
+          <div class="icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2"/>
+              <path d="M8 21h8M12 17v4"/>
+            </svg>
+          </div>
+          <h3>${escHtml(d.name)}</h3>
+          <div class="meta">
+            ${d.latest
+              ? `<span class="latest-date">最新備份 ${escHtml(d.latest)}</span>`
+              : `<span class="no-backup">尚無備份</span>`}
+            <span>${d.totalFiles} 個檔案</span>
+          </div>
+        </div>`;
+    }
+  }).join('');
 
   grid.querySelectorAll('.device-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -489,15 +593,12 @@ function renderCalendar() {
   const grid = document.getElementById('cal-grid');
   const today = new Date();
 
-  // First weekday of this month (0=Sun)
   const firstDay = new Date(currentYear, currentMonth - 1, 1).getDay();
-  // Total days in month
   const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
 
   const activeSet = new Set(activeDays);
   let html = '';
 
-  // Empty prefix cells
   for (let i = 0; i < firstDay; i++) {
     html += '<div class="cal-cell empty"></div>';
   }
