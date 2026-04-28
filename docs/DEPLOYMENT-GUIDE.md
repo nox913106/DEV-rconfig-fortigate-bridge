@@ -29,14 +29,20 @@ Fortigate (遠端，11 台)
   │
   ▼ Port 2222 (SFTP)
 stwrconfig6 (172.16.5.124)
-  └── Docker: rconfig-bridge-sftp   ← 接收備份檔
+  └── Docker: rconfig-bridge-sftp    ← 接收備份檔
   └── Docker: rconfig-bridge-watcher ← 自動轉存到 rconfig 目錄
+  └── Docker: rconfig-bridge-web     ← 備份瀏覽器 (Port 8882)
 
 轉存位置:
   /var/www/html/rconfig/storage/app/rconfig/data/
     FortigateFirewalls/{hostname}/{YYYY}/{Mon}/{DD}/
       show_1930.txt          (rconfig 可讀格式)
       {原始序列號前綴}_{原始檔名}.conf  (完整備份含 metadata)
+
+備份瀏覽器:
+  http://172.16.5.124:8882
+  - 設備列表、月曆視圖、備份下載
+  - 支援繁中 / 簡中 / 英文 三語系
 ```
 
 **為什麼需要這套系統**：rconfig 原本用 SSH `show full-configuration` 備份 Fortigate，輸出缺少 `#config-version`、`#buildno` 等 metadata，導致無法正確恢復配置。本系統透過 SFTP 接收 Fortigate 原生備份（含 metadata），再轉存到 rconfig 目錄，覆蓋 rconfig 的文字備份。
@@ -161,6 +167,7 @@ sudo docker compose ps
 NAME                     STATUS    PORTS
 rconfig-bridge-sftp      Up        0.0.0.0:2222->22/tcp
 rconfig-bridge-watcher   Up
+rconfig-bridge-web       Up        0.0.0.0:8882->5000/tcp
 ```
 
 ```bash
@@ -459,6 +466,20 @@ config system global
 3. 確認最新一筆備份存在
 4. 下載備份，確認第 1 行包含 `#config-version=`（表示 metadata 完整）
 
+### 5-5. 驗證 Web 備份瀏覽器
+
+瀏覽器開啟 `http://<主機IP>:8882`，確認：
+
+1. 設備卡片正常顯示，且顯示最新備份日期
+2. 點擊設備卡片進入月曆，有備份的日期呈綠色
+3. 點擊日期可看到備份檔案清單，下載正常
+4. Header 右上角語系切換（繁中 / 简中 / EN）正常運作
+
+```bash
+# 若 web 服務未啟動
+sudo docker compose logs web --tail 20
+```
+
 ---
 
 ## 6. 雷區預防與常見陷阱
@@ -596,6 +617,22 @@ sudo docker compose up -d
 # 更新程式碼後重建 image
 sudo git pull
 sudo docker compose up -d --build
+
+# 僅重建 web 服務（sftp/watcher 不中斷）
+sudo docker compose up -d --build web
+```
+
+### Web 備份瀏覽器
+
+```bash
+# 查看 web 服務狀態
+sudo docker compose ps web
+
+# 查看 web 日誌
+sudo docker compose logs web --tail 20
+
+# 瀏覽器入口
+# http://<主機IP>:8882
 ```
 
 ### 查看失敗的備份

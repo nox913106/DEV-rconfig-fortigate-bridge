@@ -45,6 +45,15 @@ rconfig 透過 SSH 執行 `show full-configuration` 備份 Fortigate，但輸出
 |  |                      |  - 查詢 rconfig  |   | |
 |  |                      |  - 轉存備份檔    |   | |
 |  |                      +------------------+   | |
+|  |                                             | |
+|  |  +----------------------------------+       | |
+|  |  |  Web 備份瀏覽器  :8882           |       | |
+|  |  |  (Flask + Python)                |       | |
+|  |  |  - 設備列表（線上 / 歸檔）       |       | |
+|  |  |  - 月曆視圖瀏覽備份              |       | |
+|  |  |  - 下載備份檔                    |       | |
+|  |  |  - 繁中 / 簡中 / 英文 三語系     |       | |
+|  |  +----------------------------------+       | |
 |  +--------------------------------------------+ |
 |                          |                       |
 |                          v 轉存到                |
@@ -362,6 +371,12 @@ DEV-rconfig-fortigate-bridge/
 │   ├── Dockerfile
 │   ├── requirements.txt        # Python 依賴
 │   └── bridge.py               # 核心轉存邏輯
+├── web/                        # Web 備份瀏覽器服務
+│   ├── Dockerfile
+│   ├── requirements.txt        # Python 依賴 (Flask)
+│   ├── app.py                  # Flask 後端 API
+│   └── templates/
+│       └── index.html          # 前端單頁應用（含三語系 i18n）
 ├── scripts/
 │   └── setup-ufw-fortigate.sh  # UFW 防火牆設定腳本
 ├── ssh_keys/                   # SSH 金鑰目錄
@@ -385,6 +400,7 @@ sudo docker compose ps
 NAME                     STATE     PORTS
 rconfig-bridge-sftp      Up        0.0.0.0:2222->22/tcp
 rconfig-bridge-watcher   Up
+rconfig-bridge-web       Up        0.0.0.0:8882->5000/tcp
 ```
 
 ### 2. 檢查 Watcher 日誌
@@ -512,6 +528,24 @@ ls -lh data/INCOMING_TEMP/failed/
 
 # 清理 7 天前的失敗檔案
 find data/INCOMING_TEMP/failed/ -type f -mtime +7 -delete
+```
+
+### Web 備份瀏覽器
+
+瀏覽器開啟：`http://<主機IP>:8882`
+
+功能：
+- **線上設備** Tab：列出近 30 天內有備份的設備
+- **舊資料保留** Tab：列出超過 30 天未備份的設備
+- 點擊設備卡片進入月曆視圖，點擊有備份的日期下載檔案
+- Header 右上角可切換 **繁中 / 简中 / EN** 三種語系
+
+```bash
+# 僅重建 web 服務（不影響 sftp/watcher）
+sudo docker compose up -d --build web
+
+# 查看 web 服務日誌
+sudo docker compose logs web --tail 20
 ```
 
 ---
