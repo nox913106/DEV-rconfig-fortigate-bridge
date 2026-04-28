@@ -44,7 +44,34 @@
   }
   header svg { color: var(--accent); flex-shrink: 0; }
   header h1 { font-size: 17px; font-weight: 600; letter-spacing: .3px; }
-  header span { color: var(--text-dim); font-size: 13px; }
+  header span.subtitle { color: var(--text-dim); font-size: 13px; }
+  header .spacer { flex: 1; }
+
+  /* ── Language Switcher ── */
+  .lang-switch {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .lang-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    padding: 5px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: background .12s, color .12s;
+  }
+  .lang-btn.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+  }
+  .lang-btn:hover:not(.active) { color: var(--text); }
 
   /* ── Layout ── */
   .page { max-width: 1100px; margin: 32px auto; padding: 0 20px; }
@@ -357,31 +384,37 @@
     <path d="M8 21h8M12 17v4"/>
     <path d="M7 8h10M7 11h6"/>
   </svg>
-  <h1>Fortigate 備份瀏覽器</h1>
-  <span>FortigateFirewalls 設定檔歸檔</span>
+  <h1 data-i18n="title"></h1>
+  <span class="subtitle" data-i18n="subtitle"></span>
+  <div class="spacer"></div>
+  <div class="lang-switch">
+    <button class="lang-btn" data-lang="zh-TW" onclick="setLang('zh-TW')">繁中</button>
+    <button class="lang-btn" data-lang="zh-CN" onclick="setLang('zh-CN')">简中</button>
+    <button class="lang-btn" data-lang="en" onclick="setLang('en')">EN</button>
+  </div>
 </header>
 
 <!-- Device List View -->
 <div class="page" id="device-view">
   <div class="tab-bar">
     <button class="tab-btn active" id="tab-btn-active" onclick="switchTab('active')">
-      線上設備
+      <span data-i18n="tabActive"></span>
       <span class="tab-count" id="tab-count-active">—</span>
     </button>
     <button class="tab-btn archived-tab" id="tab-btn-archived" onclick="switchTab('archived')">
-      舊資料保留
+      <span data-i18n="tabArchived"></span>
       <span class="tab-count" id="tab-count-archived">—</span>
     </button>
   </div>
   <div id="device-grid">
-    <div class="spinner"><span class="dot-pulse">載入設備清單</span></div>
+    <div class="spinner"><span class="dot-pulse" id="loading-text"></span></div>
   </div>
 </div>
 
 <!-- Calendar View -->
 <div class="page" id="calendar-view">
   <button class="back-btn" onclick="showDeviceList()">
-    ← 返回設備清單
+    <span data-i18n="backBtn"></span>
   </button>
 
   <div class="cal-header">
@@ -397,10 +430,7 @@
   </div>
 
   <div class="calendar-wrap">
-    <div class="cal-day-names">
-      <span>日</span><span>一</span><span>二</span>
-      <span>三</span><span>四</span><span>五</span><span>六</span>
-    </div>
+    <div class="cal-day-names" id="cal-day-names"></div>
     <div id="cal-grid"></div>
   </div>
 
@@ -414,6 +444,158 @@
 </div>
 
 <script>
+// ── i18n ───────────────────────────────────────────────
+const LANG = {
+  'zh-TW': {
+    title:          'Fortigate 備份瀏覽器',
+    subtitle:       'FortigateFirewalls 設定檔歸檔',
+    tabActive:      '線上設備',
+    tabArchived:    '舊資料保留',
+    backBtn:        '← 返回設備清單',
+    dayNames:       ['日','一','二','三','四','五','六'],
+    loadingDevices: '載入設備清單',
+    errorDevices:   '無法載入設備清單',
+    noArchived:     '沒有超過 30 天未備份的設備',
+    noDevices:      '找不到任何 Fortigate 設備',
+    daysAgo:        n => `${n} 天前`,
+    neverBacked:    '從未備份',
+    lastBackupLabel:'最後備份',
+    filesCount:     n => `${n} 個檔案`,
+    archivedBadge:  '⚠ 超過 30 天未備份',
+    latestBackup:   '最新備份',
+    noBackup:       '尚無備份',
+    loading:        '載入中…',
+    loadFailed:     '載入失敗',
+    noFiles:        '此日期無檔案',
+    download:       '↓ 下載',
+    latestSub:      d => `最新備份：${d}`,
+    noBackupSub:    '尚無備份',
+    dateLabel:      '日期：',
+    monthLabel:     (y, m) => `${y} 年 ${['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'][m-1]}`,
+    dayTitle:       (y, m, d) => `${y} 年 ${m} 月 ${d} 日`,
+    backupBadge:    '備份',
+    fileCount:      n => `${n} 個檔案`,
+    mtimeLocale:    'zh-TW',
+  },
+  'zh-CN': {
+    title:          'Fortigate 备份浏览器',
+    subtitle:       'FortigateFirewalls 配置文件归档',
+    tabActive:      '在线设备',
+    tabArchived:    '旧数据保留',
+    backBtn:        '← 返回设备列表',
+    dayNames:       ['日','一','二','三','四','五','六'],
+    loadingDevices: '加载设备列表',
+    errorDevices:   '无法加载设备列表',
+    noArchived:     '没有超过 30 天未备份的设备',
+    noDevices:      '找不到任何 Fortigate 设备',
+    daysAgo:        n => `${n} 天前`,
+    neverBacked:    '从未备份',
+    lastBackupLabel:'最后备份',
+    filesCount:     n => `${n} 个文件`,
+    archivedBadge:  '⚠ 超过 30 天未备份',
+    latestBackup:   '最新备份',
+    noBackup:       '暂无备份',
+    loading:        '加载中…',
+    loadFailed:     '加载失败',
+    noFiles:        '该日期无文件',
+    download:       '↓ 下载',
+    latestSub:      d => `最新备份：${d}`,
+    noBackupSub:    '暂无备份',
+    dateLabel:      '日期：',
+    monthLabel:     (y, m) => `${y} 年 ${['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'][m-1]}`,
+    dayTitle:       (y, m, d) => `${y} 年 ${m} 月 ${d} 日`,
+    backupBadge:    '备份',
+    fileCount:      n => `${n} 个文件`,
+    mtimeLocale:    'zh-CN',
+  },
+  'en': {
+    title:          'Fortigate Backup Browser',
+    subtitle:       'FortigateFirewalls Config Archive',
+    tabActive:      'Active Devices',
+    tabArchived:    'Archived',
+    backBtn:        '← Back to Devices',
+    dayNames:       ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],
+    loadingDevices: 'Loading devices...',
+    errorDevices:   'Failed to load devices',
+    noArchived:     'No devices inactive for over 30 days',
+    noDevices:      'No Fortigate devices found',
+    daysAgo:        n => `${n} day${n !== 1 ? 's' : ''} ago`,
+    neverBacked:    'Never backed up',
+    lastBackupLabel:'Last backup',
+    filesCount:     n => `${n} file${n !== 1 ? 's' : ''}`,
+    archivedBadge:  '⚠ Inactive 30+ days',
+    latestBackup:   'Latest backup',
+    noBackup:       'No backup yet',
+    loading:        'Loading...',
+    loadFailed:     'Load failed',
+    noFiles:        'No files for this date',
+    download:       '↓ Download',
+    latestSub:      d => `Latest: ${d}`,
+    noBackupSub:    'No backup yet',
+    dateLabel:      'Date: ',
+    monthLabel:     (y, m) => `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1]} ${y}`,
+    dayTitle:       (y, m, d) => `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1]} ${d}, ${y}`,
+    backupBadge:    'bkp',
+    fileCount:      n => `${n} file${n !== 1 ? 's' : ''}`,
+    mtimeLocale:    'en-US',
+  }
+};
+
+let currentLang = localStorage.getItem('lang') || 'zh-TW';
+if (!LANG[currentLang]) currentLang = 'zh-TW';
+
+function t(key, ...args) {
+  const val = LANG[currentLang][key];
+  return typeof val === 'function' ? val(...args) : val;
+}
+
+function setLang(lang) {
+  currentLang = lang;
+  localStorage.setItem('lang', lang);
+  document.documentElement.lang = lang;
+  applyStaticI18n();
+  // Re-render current view
+  if (currentDevice) {
+    document.getElementById('cal-device-sub').textContent =
+      currentDevice.latest ? t('latestSub', currentDevice.latest) : t('noBackupSub');
+    document.getElementById('month-label').textContent =
+      t('monthLabel', currentYear, currentMonth);
+    renderCalendarDayNames();
+    renderCalendar();
+    if (selectedDay !== null) {
+      const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][currentMonth - 1];
+      document.getElementById('file-panel-title').textContent =
+        t('dayTitle', currentYear, currentMonth, selectedDay);
+      const fc = document.getElementById('file-count').textContent;
+      // file count badge — re-parse from current text (already set)
+    }
+  } else {
+    renderDeviceGrid(allDevices);
+  }
+}
+
+function applyStaticI18n() {
+  // Update data-i18n elements
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  // Update page title
+  document.title = t('title');
+  // Update loading spinner if still visible
+  const loadingText = document.getElementById('loading-text');
+  if (loadingText) loadingText.textContent = t('loadingDevices');
+  // Update lang button active state
+  document.querySelectorAll('.lang-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.lang === currentLang);
+  });
+}
+
+function renderCalendarDayNames() {
+  const names = t('dayNames');
+  document.getElementById('cal-day-names').innerHTML =
+    names.map(n => `<span>${n}</span>`).join('');
+}
+
 // ── State ──────────────────────────────────────────────
 let allDevices    = [];
 let currentTab    = 'active';
@@ -425,8 +607,6 @@ let selectedDay   = null;
 
 const MON_ABBR = ['Jan','Feb','Mar','Apr','May','Jun',
                   'Jul','Aug','Sep','Oct','Nov','Dec'];
-const MON_ZH   = ['1 月','2 月','3 月','4 月','5 月','6 月',
-                  '7 月','8 月','9 月','10 月','11 月','12 月'];
 
 // ── Views ──────────────────────────────────────────────
 function showDeviceList() {
@@ -443,7 +623,7 @@ async function showCalendar(device) {
   document.getElementById('calendar-view').style.display = 'block';
   document.getElementById('cal-device-name').textContent = device.name;
   document.getElementById('cal-device-sub').textContent =
-    device.latest ? `最新備份：${device.latest}` : '尚無備份';
+    device.latest ? t('latestSub', device.latest) : t('noBackupSub');
   document.getElementById('file-panel').style.display = 'none';
 
   if (device.latest) {
@@ -455,6 +635,7 @@ async function showCalendar(device) {
     currentMonth = new Date().getMonth() + 1;
   }
 
+  renderCalendarDayNames();
   await loadCalendar();
 }
 
@@ -474,17 +655,17 @@ async function loadDevices() {
     renderDeviceGrid(allDevices);
   } catch (e) {
     document.getElementById('device-grid').innerHTML =
-      '<div class="spinner" style="color:var(--red)">無法載入設備清單</div>';
+      `<div class="spinner" style="color:var(--red)">${t('errorDevices')}</div>`;
   }
 }
 
 async function loadCalendar() {
   document.getElementById('cal-grid').innerHTML =
-    '<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--text-dim)">載入中…</div>';
+    `<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--text-dim)">${t('loading')}</div>`;
   document.getElementById('file-panel').style.display = 'none';
 
   document.getElementById('month-label').textContent =
-    `${currentYear} 年 ${MON_ZH[currentMonth - 1]}`;
+    t('monthLabel', currentYear, currentMonth);
 
   try {
     const res = await fetch(
@@ -503,11 +684,11 @@ async function loadDayFiles(day) {
   renderCalendar();
 
   const mon = MON_ABBR[currentMonth - 1];
-  const dateStr = `${currentYear} 年 ${currentMonth} 月 ${day} 日`;
-  document.getElementById('file-panel-title').textContent = dateStr;
+  document.getElementById('file-panel-title').textContent =
+    t('dayTitle', currentYear, currentMonth, day);
   document.getElementById('file-panel').style.display = 'block';
   document.getElementById('file-list').innerHTML =
-    '<div class="spinner" style="padding:20px">載入中…</div>';
+    `<div class="spinner" style="padding:20px">${t('loading')}</div>`;
 
   try {
     const res = await fetch(
@@ -517,7 +698,7 @@ async function loadDayFiles(day) {
     renderFileList(files, day, mon);
   } catch (e) {
     document.getElementById('file-list').innerHTML =
-      '<div class="spinner" style="color:var(--red)">載入失敗</div>';
+      `<div class="spinner" style="color:var(--red)">${t('loadFailed')}</div>`;
   }
 }
 
@@ -532,16 +713,14 @@ function renderDeviceGrid(devices) {
   const grid = document.getElementById('device-grid');
 
   if (!filtered.length) {
-    const msg = currentTab === 'archived'
-      ? '沒有超過 30 天未備份的設備'
-      : '找不到任何 Fortigate 設備';
+    const msg = currentTab === 'archived' ? t('noArchived') : t('noDevices');
     grid.innerHTML = `<div class="spinner">${msg}</div>`;
     return;
   }
 
   grid.innerHTML = filtered.map(d => {
     if (d.archived) {
-      const daysText = d.daysAgo != null ? `${d.daysAgo} 天前` : '從未備份';
+      const daysText = d.daysAgo != null ? t('daysAgo', d.daysAgo) : t('neverBacked');
       return `
         <div class="device-card archived" data-device='${JSON.stringify(d).replace(/'/g, "&#39;")}'>
           <div class="icon">
@@ -554,10 +733,10 @@ function renderDeviceGrid(devices) {
           </div>
           <h3>${escHtml(d.name)}</h3>
           <div class="meta">
-            <span class="stale-warn">最後備份 ${daysText}</span>
-            ${d.latest ? `<span>日期：${escHtml(d.latest)}</span>` : ''}
-            <span>${d.totalFiles} 個檔案</span>
-            <span class="archived-badge">⚠ 超過 30 天未備份</span>
+            <span class="stale-warn">${t('lastBackupLabel')} ${daysText}</span>
+            ${d.latest ? `<span>${t('dateLabel')}${escHtml(d.latest)}</span>` : ''}
+            <span>${t('filesCount', d.totalFiles)}</span>
+            <span class="archived-badge">${t('archivedBadge')}</span>
           </div>
         </div>`;
     } else {
@@ -573,9 +752,9 @@ function renderDeviceGrid(devices) {
           <h3>${escHtml(d.name)}</h3>
           <div class="meta">
             ${d.latest
-              ? `<span class="latest-date">最新備份 ${escHtml(d.latest)}</span>`
-              : `<span class="no-backup">尚無備份</span>`}
-            <span>${d.totalFiles} 個檔案</span>
+              ? `<span class="latest-date">${t('latestBackup')} ${escHtml(d.latest)}</span>`
+              : `<span class="no-backup">${t('noBackup')}</span>`}
+            <span>${t('filesCount', d.totalFiles)}</span>
           </div>
         </div>`;
     }
@@ -621,7 +800,7 @@ function renderCalendar() {
     html += `
       <div class="${cls}" ${onclick ? `onclick="${onclick}"` : ''}>
         ${d}
-        ${hasBackup ? '<span class="badge">備份</span>' : ''}
+        ${hasBackup ? `<span class="badge">${t('backupBadge')}</span>` : ''}
       </div>`;
   }
 
@@ -630,11 +809,11 @@ function renderCalendar() {
 }
 
 function renderFileList(files, day, mon) {
-  document.getElementById('file-count').textContent = `${files.length} 個檔案`;
+  document.getElementById('file-count').textContent = t('fileCount', files.length);
 
   if (!files.length) {
     document.getElementById('file-list').innerHTML =
-      '<div class="spinner" style="padding:16px;color:var(--text-dim)">此日期無檔案</div>';
+      `<div class="spinner" style="padding:16px;color:var(--text-dim)">${t('noFiles')}</div>`;
     return;
   }
 
@@ -643,7 +822,7 @@ function renderFileList(files, day, mon) {
     const nameHtml = f.name.replace(/\.(conf|txt)$/i,
       `.<span class="ext-${ext === 'conf' ? 'conf' : 'txt'}">$1</span>`);
     const size = fmtSize(f.size);
-    const mtime = new Date(f.mtime * 1000).toLocaleString('zh-TW');
+    const mtime = new Date(f.mtime * 1000).toLocaleString(t('mtimeLocale'));
     const href =
       `/download/${encodeURIComponent(currentDevice.name)}` +
       `/${currentYear}/${mon}/${day}/${encodeURIComponent(f.name)}`;
@@ -661,7 +840,7 @@ function renderFileList(files, day, mon) {
         </div>
         <span class="file-size">${size}</span>
         <a class="dl-btn" href="${href}" download>
-          ↓ 下載
+          ${t('download')}
         </a>
       </div>`;
   }).join('');
@@ -689,6 +868,7 @@ function escHtml(str) {
 }
 
 // ── Init ───────────────────────────────────────────────
+applyStaticI18n();
 loadDevices();
 </script>
 </body>
